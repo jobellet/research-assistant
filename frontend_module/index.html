@@ -1,0 +1,787 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My AI Research Assistant | LaTeX Editor</title>
+    <meta
+      name="description"
+      content="AI-powered LaTeX editor with semantic search and citation management across multiple projects."
+    />
+    <link rel="stylesheet" href="style.css?v=3" />
+    <!-- Load D3.js for Knowledge Graph -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+  </head>
+  <body>
+    <div class="app-container">
+      <!-- Sidebar Overlay for mobile -->
+      <div id="sidebar-overlay" class="sidebar-overlay mobile-only"></div>
+
+      <!-- Sidebar -->
+      <aside class="sidebar">
+        <div class="logo">
+          <svg
+            aria-hidden="true"
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+            <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+          </svg>
+          <span>ResearchAI</span>
+        </div>
+
+        <!-- Project Switcher -->
+        <div class="project-section">
+          <div class="project-section-header">
+            <span class="project-label">PROJECT</span>
+            <button
+              id="btn-new-project"
+              class="icon-btn"
+              title="New Project"
+              aria-label="Create new project"
+            >
+              ＋
+            </button>
+          </div>
+          <div class="project-select-wrapper">
+            <select id="project-select" aria-label="Select project"></select>
+          </div>
+        </div>
+
+        <!-- New Project Modal (inline) -->
+        <div id="new-project-modal" class="inline-modal hidden">
+          <input
+            id="new-project-name"
+            type="text"
+            placeholder="my-paper-name"
+            autocomplete="off"
+            aria-label="New project name"
+          />
+          <div class="inline-modal-actions">
+            <button id="btn-create-project" class="action-btn-sm" disabled>
+              Create
+            </button>
+            <button id="btn-cancel-project" class="action-btn-sm secondary">
+              Cancel
+            </button>
+          </div>
+        </div>
+
+        <!-- File List -->
+        <nav>
+          <ul id="file-list">
+            <li
+              class="nav-item active"
+              data-file="draft"
+              role="button"
+              tabindex="0"
+            >
+              draft.tex
+            </li>
+            <li class="nav-item" data-file="bib" role="button" tabindex="0">
+              references.bib
+            </li>
+          </ul>
+        </nav>
+
+        <!-- Delete Project -->
+        <div class="sidebar-footer">
+          <button
+            id="btn-delete-project"
+            class="danger-btn"
+            title="Delete active project"
+          >
+            🗑 Delete Project
+          </button>
+        </div>
+      </aside>
+
+      <!-- Main Workspace -->
+      <main class="main-content">
+        <header class="header">
+          <div class="mobile-header-left">
+            <button
+              id="btn-toggle-sidebar"
+              class="icon-btn mobile-only"
+              aria-label="Toggle Sidebar"
+              title="Toggle Sidebar"
+            >
+              ☰
+            </button>
+            <div class="file-info">
+              <span id="current-filename">default / draft.tex</span>
+              <span
+                id="save-status"
+                role="status"
+                aria-live="polite"
+                style="
+                  margin-left: 1rem;
+                  color: var(--text-secondary);
+                  font-size: 0.8rem;
+                "
+                >Saved</span
+              >
+            </div>
+          </div>
+          <nav class="header-actions desktop-only">
+            <button id="btn-editor" class="view-btn active-view">Editor</button>
+            <button id="btn-graph" class="view-btn">Knowledge Graph</button>
+          </nav>
+          <div class="actions">
+            <button id="auth-btn" class="view-btn">Login</button>
+          </div>
+        </header>
+
+        <div class="editor-wrapper" id="editor-workspace">
+          <textarea
+            id="latex-editor"
+            placeholder="Start typing your LaTeX manuscript here... Highlight text to search your library."
+            aria-label="LaTeX Editor"
+          ></textarea>
+        </div>
+
+        <!-- Knowledge Graph Workspace -->
+        <div id="graph-workspace">
+          <svg
+            id="graph-canvas"
+            role="img"
+            aria-label="Knowledge Graph Visualization"
+          ></svg>
+        </div>
+
+        <!-- Mobile Bottom Nav -->
+        <nav class="mobile-nav mobile-only">
+          <button
+            id="mobile-btn-editor"
+            class="mobile-nav-item active"
+            data-view="editor"
+          >
+            <svg
+              aria-hidden="true"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path
+                d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"
+              ></path>
+              <path
+                d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"
+              ></path>
+            </svg>
+            <span>Editor</span>
+          </button>
+          <button
+            id="mobile-btn-matches"
+            class="mobile-nav-item"
+            data-view="matches"
+          >
+            <svg
+              aria-hidden="true"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <span>Matches</span>
+          </button>
+          <button
+            id="mobile-btn-library"
+            class="mobile-nav-item"
+            data-view="library"
+          >
+            <svg
+              aria-hidden="true"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+              <path
+                d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"
+              ></path>
+            </svg>
+            <span>Library</span>
+          </button>
+          <button
+            id="mobile-btn-graph"
+            class="mobile-nav-item"
+            data-view="graph"
+          >
+            <svg
+              aria-hidden="true"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <circle cx="18" cy="5" r="3"></circle>
+              <circle cx="6" cy="12" r="3"></circle>
+              <circle cx="18" cy="19" r="3"></circle>
+              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+              <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+            </svg>
+            <span>Graph</span>
+          </button>
+          <button id="mobile-btn-chat" class="mobile-nav-item" data-view="chat">
+            <svg
+              aria-hidden="true"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path
+                d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
+              ></path>
+            </svg>
+            <span>AI Chat</span>
+          </button>
+        </nav>
+      </main>
+
+      <!-- Smart Results Panel -->
+      <aside class="side-panel">
+        <div class="panel-header" role="tablist">
+          <button
+            id="tab-library"
+            class="panel-tab active"
+            role="tab"
+            aria-controls="library-container"
+            aria-selected="true"
+          >
+            Library
+          </button>
+          <button
+            id="tab-matches"
+            class="panel-tab"
+            role="tab"
+            aria-controls="results-container"
+            aria-selected="false"
+          >
+            Matches
+          </button>
+          <button
+            id="tab-chat"
+            class="panel-tab"
+            role="tab"
+            aria-controls="chat-container"
+            aria-selected="false"
+          >
+            Ask AI
+          </button>
+          <button
+            id="tab-potd"
+            class="panel-tab"
+            role="tab"
+            aria-controls="potd-container"
+            aria-selected="false"
+          >
+            POTD
+          </button>
+          <button
+            id="tab-seminal"
+            class="panel-tab"
+            role="tab"
+            aria-controls="seminal-container"
+            aria-selected="false"
+          >
+            Seminal
+          </button>
+        </div>
+
+        <div
+          id="library-container"
+          class="panel-content active-content"
+          role="tabpanel"
+          aria-labelledby="tab-library"
+        >
+          <div
+            class="library-search-wrapper"
+            style="
+              padding-bottom: 1rem;
+              border-bottom: 1px solid var(--glass-border);
+              margin-bottom: 1rem;
+            "
+          >
+            <div style="position: relative; width: 100%; margin-bottom: 0.5rem">
+              <input
+                type="text"
+                id="library-search-input"
+                aria-label="Library Search"
+                placeholder="Search by title, author, semantic context..."
+                style="
+                  width: 100%;
+                  background: var(--glass-bg);
+                  border: 1px solid var(--glass-border);
+                  border-radius: 0.375rem;
+                  color: var(--text-primary);
+                  font-family: var(--font-sans);
+                  padding: 0.6rem;
+                  padding-right: 3rem;
+                  outline: none;
+                  box-sizing: border-box;
+                "
+              />
+              <kbd
+                style="
+                  position: absolute;
+                  right: 0.75rem;
+                  top: 0.65rem;
+                  font-family: var(--font-mono);
+                  font-size: 0.7rem;
+                  color: var(--text-secondary);
+                  background: transparent;
+                  padding: 0.1rem 0.4rem;
+                  border-radius: 0.25rem;
+                  border: 1px solid var(--glass-border);
+                  pointer-events: none;
+                "
+                >⌘K</kbd
+              >
+            </div>
+            <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem">
+              <input
+                type="number"
+                id="library-filter-year"
+                aria-label="Filter by Year"
+                placeholder="Year"
+                style="
+                  flex: 1;
+                  background: var(--glass-bg);
+                  border: 1px solid var(--glass-border);
+                  border-radius: 0.375rem;
+                  color: var(--text-primary);
+                  padding: 0.4rem;
+                  outline: none;
+                  font-size: 0.8rem;
+                "
+              />
+              <input
+                type="text"
+                id="library-filter-author"
+                aria-label="Filter by Author"
+                placeholder="Author"
+                style="
+                  flex: 1;
+                  background: var(--glass-bg);
+                  border: 1px solid var(--glass-border);
+                  border-radius: 0.375rem;
+                  color: var(--text-primary);
+                  padding: 0.4rem;
+                  outline: none;
+                  font-size: 0.8rem;
+                "
+              />
+              <input
+                type="text"
+                id="library-filter-journal"
+                aria-label="Filter by Journal"
+                placeholder="Journal"
+                style="
+                  flex: 1;
+                  background: var(--glass-bg);
+                  border: 1px solid var(--glass-border);
+                  border-radius: 0.375rem;
+                  color: var(--text-primary);
+                  padding: 0.4rem;
+                  outline: none;
+                  font-size: 0.8rem;
+                "
+              />
+            </div>
+            <div style="display: flex; gap: 0.3rem; flex-wrap: wrap">
+              <button
+                id="btn-search-filter"
+                class="view-btn active"
+                style="
+                  flex: 1;
+                  justify-content: center;
+                  font-size: 0.7rem;
+                  padding: 0.3rem;
+                "
+              >
+                Filter
+              </button>
+              <button
+                id="btn-search-semantic"
+                class="view-btn"
+                style="
+                  flex: 1;
+                  justify-content: center;
+                  font-size: 0.7rem;
+                  padding: 0.3rem;
+                "
+              >
+                Semantic
+              </button>
+              <button
+                id="btn-search-freq"
+                class="view-btn"
+                style="
+                  flex: 1;
+                  justify-content: center;
+                  font-size: 0.7rem;
+                  padding: 0.3rem;
+                "
+              >
+                Word Frequency
+              </button>
+            </div>
+          </div>
+          <div
+            id="library-list"
+            style="overflow-y: auto; flex: 1; padding-right: 0.5rem"
+          >
+            <div
+              class="text-secondary"
+              style="font-size: 0.9rem; text-align: center; margin-top: 2rem"
+            >
+              Loading library...
+            </div>
+          </div>
+        </div>
+
+        <div
+          id="results-container"
+          class="panel-content"
+          style="display: none"
+          role="tabpanel"
+          aria-labelledby="tab-matches"
+        >
+          <div
+            class="empty-state"
+            style="text-align: center; padding: 2rem 1rem"
+          >
+            <div
+              style="font-size: 2rem; margin-bottom: 1rem"
+              aria-hidden="true"
+            >
+              🔍
+            </div>
+            <div
+              class="text-secondary"
+              style="margin-bottom: 0.5rem; font-weight: 500"
+            >
+              No matches yet
+            </div>
+            <div
+              style="
+                font-size: 0.85rem;
+                color: var(--text-secondary);
+                opacity: 0.8;
+              "
+            >
+              Highlight a claim in your draft to find supporting papers.
+            </div>
+          </div>
+        </div>
+
+        <div
+          id="chat-container"
+          class="panel-content"
+          style="display: none"
+          role="tabpanel"
+          aria-labelledby="tab-chat"
+        >
+          <div
+            id="chat-controls"
+            style="
+              padding: 10px;
+              border-bottom: 1px solid var(--glass-border);
+              text-align: center;
+            "
+          >
+            <button
+              id="btn-activate-ai"
+              class="view-btn"
+              style="
+                width: 100%;
+                justify-content: center;
+                background: var(--accent-color);
+                color: white;
+              "
+            >
+              Activate AI Chat
+            </button>
+            <div
+              id="ai-status"
+              role="status"
+              aria-live="polite"
+              class="text-secondary"
+              style="font-size: 0.8rem; margin-top: 5px"
+            >
+              Status: Offline
+            </div>
+          </div>
+          <div id="chat-messages">
+            <div class="chat-message assistant-msg">
+              Hi! Highlight some text and I can synthesize an answer based on
+              your library.
+            </div>
+          </div>
+          <div
+            class="chat-input-wrapper"
+            style="
+              flex-direction: column;
+              align-items: stretch;
+              padding: 0.5rem;
+              gap: 0;
+            "
+          >
+            <div
+              style="
+                display: flex;
+                width: 100%;
+                gap: 0.5rem;
+                align-items: center;
+              "
+            >
+              <textarea
+                id="chat-input"
+                aria-label="Chat input"
+                aria-describedby="chat-input-hint"
+                placeholder="Ask about the retrieved papers..."
+                style="flex: 1; resize: none; min-height: 40px"
+              ></textarea>
+              <button
+                id="btn-send-chat"
+                aria-label="Send"
+                title="Type a message to send"
+                disabled
+              >
+                ↑
+              </button>
+            </div>
+            <div
+              id="chat-input-hint"
+              style="
+                font-size: 0.7rem;
+                color: var(--text-secondary);
+                text-align: right;
+                margin-top: 4px;
+                pointer-events: none;
+                padding-right: 42px;
+              "
+            >
+              <kbd
+                style="
+                  font-family: var(--font-mono);
+                  background: transparent;
+                  border: 1px solid var(--glass-border);
+                  border-radius: 0.25rem;
+                  padding: 0.1rem 0.3rem;
+                "
+                >Enter</kbd
+              >
+              to send,
+              <kbd
+                style="
+                  font-family: var(--font-mono);
+                  background: transparent;
+                  border: 1px solid var(--glass-border);
+                  border-radius: 0.25rem;
+                  padding: 0.1rem 0.3rem;
+                "
+                >Shift + Enter</kbd
+              >
+              for new line
+            </div>
+          </div>
+        </div>
+        <div
+          id="potd-container"
+          class="panel-content"
+          style="display: none"
+          role="tabpanel"
+          aria-labelledby="tab-potd"
+        >
+          <div
+            class="text-secondary"
+            style="
+              font-size: 0.9rem;
+              text-align: center;
+              margin-top: 1rem;
+              margin-bottom: 1rem;
+            "
+          >
+            Top papers citing your library that you haven't read yet.
+          </div>
+          <div
+            style="
+              display: flex;
+              gap: 0.3rem;
+              flex-wrap: wrap;
+              margin-bottom: 1rem;
+            "
+          >
+            <button
+              id="btn-refresh-potd"
+              class="view-btn"
+              onclick="loadPOTD()"
+              style="
+                width: 100%;
+                background: var(--accent-color);
+                color: white;
+                justify-content: center;
+              "
+            >
+              Refresh POTD
+            </button>
+          </div>
+          <div
+            id="potd-list"
+            style="overflow-y: auto; flex: 1; padding-right: 0.5rem"
+          >
+            <!-- POTD results will go here -->
+          </div>
+        </div>
+
+        <div
+          id="seminal-container"
+          class="panel-content"
+          style="display: none"
+          role="tabpanel"
+          aria-labelledby="tab-seminal"
+        >
+          <div
+            class="text-secondary"
+            style="
+              font-size: 0.9rem;
+              text-align: center;
+              margin-top: 1rem;
+              margin-bottom: 1rem;
+            "
+          >
+            Foundational papers cited most frequently by your library.
+          </div>
+          <div
+            style="
+              display: flex;
+              gap: 0.3rem;
+              flex-wrap: wrap;
+              margin-bottom: 1rem;
+            "
+          >
+            <button
+              id="btn-refresh-seminal"
+              class="view-btn"
+              onclick="loadSeminal()"
+              style="
+                width: 100%;
+                background: var(--accent-color);
+                color: white;
+                justify-content: center;
+              "
+            >
+              Refresh Seminal
+            </button>
+          </div>
+          <div
+            id="seminal-list"
+            style="overflow-y: auto; flex: 1; padding-right: 0.5rem"
+          >
+            <!-- Seminal results will go here -->
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- PDF Modal -->
+    <div id="pdf-modal" class="modal-overlay">
+      <div class="modal-content" role="dialog" aria-modal="true" aria-label="PDF Viewer">
+        <button
+          class="close-modal"
+          id="close-pdf-modal"
+          aria-label="Close PDF viewer"
+          title="Close PDF viewer"
+        >
+          &times;
+        </button>
+        <iframe id="pdf-frame" src=""></iframe>
+      </div>
+    </div>
+
+    <!-- Text Modal -->
+    <div id="text-modal" class="modal-overlay">
+      <div class="modal-content" style="max-width: 800px; padding: 2rem" role="dialog" aria-modal="true" aria-labelledby="text-modal-title">
+        <button
+          class="close-modal"
+          id="close-text-modal"
+          aria-label="Close Text viewer"
+          title="Close Text viewer"
+        >
+          &times;
+        </button>
+        <h3
+          id="text-modal-title"
+          style="
+            margin-top: 0;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--glass-border);
+            padding-bottom: 0.5rem;
+          "
+        >
+          Raw Text
+        </h3>
+        <div
+          id="text-modal-body"
+          style="
+            white-space: pre-wrap;
+            font-family: var(--font-mono);
+            font-size: 0.9rem;
+            overflow-y: auto;
+            height: calc(100% - 60px);
+            color: var(--text-secondary);
+          "
+        >
+          Loading...
+        </div>
+      </div>
+    </div>
+
+    <!-- Graph Modal -->
+    <div id="graph-modal" class="modal-overlay">
+      <div class="modal-content" style="max-width: 90vw; height: 90vh" role="dialog" aria-modal="true" aria-label="Knowledge Graph Explorer">
+        <button
+          class="close-modal"
+          id="close-graph-modal"
+          aria-label="Close Graph viewer"
+          title="Close Graph viewer"
+        >
+          &times;
+        </button>
+        <iframe
+          id="graph-frame"
+          src=""
+          style="width: 100%; height: 100%; border: none; border-radius: 8px"
+        ></iframe>
+      </div>
+    </div>
+
+    <!-- Application Script -->
+    <script src="app.js?v=3"></script>
+  </body>
+</html>

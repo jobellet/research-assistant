@@ -1,0 +1,27 @@
+# Environment & Secrets
+.env
+SERVER_ACCESS.md
+*.lock
+*.log
+*.err
+*.out
+slurm_logs/
+__pycache__/
+*.pyc
+
+# Local Database & Storage
+chroma_db/
+tmp_bench_library/
+tmp_bench_inbox/
+
+# Research PDF Data (Ignore actual PDFs, keep structure)
+inbox/*
+!inbox/.gitkeep
+library/**/*.pdf
+library/graph_cache.json
+library/citation_graph.json
+library/global_bow_index.json
+
+# OS Specific
+.DS_Store
+Thumbs.db

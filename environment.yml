@@ -1,0 +1,38 @@
+name: ai_research_assistant
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - cmake
+  - llvm-openmp
+  - numpy<2
+  - pandas
+  - scikit-learn
+  - scipy
+  - numba
+  - hdbscan
+  - umap-learn
+  - transformers
+  - accelerate
+  - huggingface_hub
+  - pydantic
+  - mne
+  - sentence-transformers
+  - fastapi
+  - uvicorn
+  - watchdog
+  - pytest
+  - requests
+  - python-dotenv
+  - jinja2
+  - pytorch>=2.4
+  - pip:
+    - PyMuPDF
+    - gdown
+    - chromadb
+    - bibtexparser
+    - python-multipart
+    - einops
+    - hf_transfer

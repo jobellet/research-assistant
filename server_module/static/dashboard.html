@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Research Assistant | Management Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0c0d12;
+            --glass-bg: rgba(255, 255, 255, 0.05);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --primary: #6366f1;
+            --secondary: #a855f7;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            background-image: 
+                radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), 
+                radial-gradient(at 50% 0%, hsla(225,39%,30%,0.3) 0, transparent 50%),
+                radial-gradient(at 100% 0%, hsla(267,45%,43%,0.2) 0, transparent 50%);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            overflow-x: hidden;
+        }
+
+        /* Sidebar container */
+        aside {
+            width: 300px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            border-right: 1px solid var(--glass-border);
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+            height: 100vh;
+            position: fixed;
+        }
+
+        .logo {
+            font-size: 1.25rem;
+            font-weight: 700;
+            background: linear-gradient(to right, var(--primary), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .sidebar-section h3 {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+        }
+
+        /* Toggles */
+        .toggle-group {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .toggle-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.875rem;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 22px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(255, 255, 255, 0.1);
+            transition: .4s;
+            border-radius: 34px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: var(--primary);
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(22px);
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 0.75rem 1rem;
+            border-radius: 12px;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.875rem;
+            transition: transform 0.2s, opacity 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn:hover {
+            transform: scale(1.02);
+            opacity: 0.9;
+        }
+
+        .btn-primary {
+            background: linear-gradient(to right, var(--primary), var(--secondary));
+            color: white;
+            width: 100%;
+            box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
+        }
+
+        .btn-outline {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid var(--glass-border);
+            color: var(--text-main);
+        }
+
+        /* Main Content */
+        main {
+            flex: 1;
+            margin-left: 300px;
+            padding: 3rem;
+            max-width: 1200px;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        .status-badge {
+            padding: 0.5rem 1rem;
+            background: var(--glass-bg);
+            border-radius: 50px;
+            border: 1px solid var(--glass-border);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .pulse {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--text-muted);
+        }
+
+        .pulse.active {
+            background: var(--success);
+            box-shadow: 0 0 10px var(--success);
+            animation: pulse-animation 2s infinite;
+        }
+
+        @keyframes pulse-animation {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+
+        /* Glass Table */
+        .table-container {
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            overflow: hidden;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+        }
+
+        th {
+            padding: 1.25rem 1.5rem;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            border-bottom: 1px solid var(--glass-border);
+        }
+
+        td {
+            padding: 1.25rem 1.5rem;
+            font-size: 0.875rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        .hash-id {
+            font-family: monospace;
+            color: var(--text-muted);
+            font-size: 0.75rem;
+        }
+
+        .badge {
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 0.7rem;
+            font-weight: 700;
+        }
+
+        .badge-success { background: rgba(16, 185, 129, 0.1); color: var(--success); }
+        .badge-warning { background: rgba(245, 158, 11, 0.1); color: var(--warning); }
+        .badge-danger { background: rgba(239, 68, 68, 0.1); color: var(--danger); }
+
+        .missing-fields {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+        }
+
+        .missing-tag {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--danger);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.65rem;
+        }
+
+        /* Controls */
+        .controls {
+            display: flex;
+            gap: 1rem;
+        }
+
+    </style>
+</head>
+<body>
+    <aside>
+        <div class="logo">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            ResearchAssistant
+        </div>
+
+        <div class="sidebar-section">
+            <h3>Processing Toggles</h3>
+            <div class="toggle-group" id="toggles">
+                <div class="toggle-item">
+                    <span>Process New PDFs</span>
+                    <label class="switch"><input type="checkbox" id="process_new_pdfs" checked><span class="slider"></span></label>
+                </div>
+                <div class="toggle-item">
+                    <span>Add DOI</span>
+                    <label class="switch"><input type="checkbox" id="add_doi" checked><span class="slider"></span></label>
+                </div>
+                <div class="toggle-item">
+                    <span>Add Authors</span>
+                    <label class="switch"><input type="checkbox" id="add_authors" checked><span class="slider"></span></label>
+                </div>
+                <div class="toggle-item">
+                    <span>Add Title</span>
+                    <label class="switch"><input type="checkbox" id="add_title" checked><span class="slider"></span></label>
+                </div>
+                <div class="toggle-item">
+                    <span>Find Keywords</span>
+                    <label class="switch"><input type="checkbox" id="find_keyword" checked><span class="slider"></span></label>
+                </div>
+                <div class="toggle-item">
+                    <span>Compute Embeddings</span>
+                    <label class="switch"><input type="checkbox" id="compute_semantic_embedding" checked><span class="slider"></span></label>
+                </div>
+            </div>
+        </div>
+
+        <div style="margin-top: auto;">
+            <button class="btn btn-primary" id="run-btn">
+                Run Process
+            </button>
+        </div>
+    </aside>
+
+    <main>
+        <header>
+            <div>
+                <h1>Backend Monitor</h1>
+                <p style="color: var(--text-muted); font-size: 0.875rem;">Manage your paper library and AI tasks.</p>
+            </div>
+            <div class="controls">
+                <button class="btn btn-outline" id="sync-btn" title="Refresh Git Repository">Sync Repo</button>
+                <div class="status-badge">
+                    <div class="pulse" id="status-pulse"></div>
+                    <span id="status-text">Processor: Idle</span>
+                </div>
+            </div>
+        </header>
+
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Filename</th>
+                        <th>Status</th>
+                        <th>Title / Authors</th>
+                        <th>Missing Fields</th>
+                    </tr>
+                </thead>
+                <tbody id="papers-table">
+                    <tr>
+                        <td colspan="4" style="text-align: center; color: var(--text-muted);">Loading library...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </main>
+
+    <script>
+        const API_BASE = '/api';
+        let isRunning = false;
+
+        async function fetchStatus() {
+            const res = await fetch(`${API_BASE}/status`);
+            const data = await res.json();
+            updateStatusUI(data);
+        }
+
+        function updateStatusUI(data) {
+            isRunning = data.running;
+            const pulse = document.getElementById('status-pulse');
+            const text = document.getElementById('status-text');
+            const btn = document.getElementById('run-btn');
+
+            if (isRunning) {
+                pulse.classList.add('active');
+                text.innerText = 'Processor: Running';
+                btn.innerText = 'Stop Process';
+                btn.style.background = 'var(--danger)';
+            } else {
+                pulse.classList.remove('active');
+                text.innerText = 'Processor: Idle';
+                btn.innerText = 'Run Process';
+                btn.style.background = 'linear-gradient(to right, var(--primary), var(--secondary))';
+            }
+
+            // Sync toggles with current config
+            Object.keys(data.config).forEach(key => {
+                const el = document.getElementById(key);
+                if (el) el.checked = data.config[key];
+            });
+        }
+
+        async function fetchPapers() {
+            try {
+                const res = await fetch(`${API_BASE}/papers`);
+                const papers = await res.json();
+                const tbody = document.getElementById('papers-table');
+                
+                if (papers.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--text-muted);">Library is empty. Drop PDFs in inbox/</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = papers.map(p => `
+                    <tr>
+                        <td>
+                            <div style="font-weight: 600;">${p.filename}</div>
+                            <div class="hash-id">${p.hash.substring(0, 12)}...</div>
+                        </td>
+                        <td>
+                            <span class="badge ${getStatusClass(p.status)}">${p.status}</span>
+                        </td>
+                        <td>
+                            <div style="font-weight: 600; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${p.title || 'Unknown Title'}</div>
+                            <div style="color: var(--text-muted); font-size: 0.75rem;">${p.authors.length ? p.authors.join(', ') : 'No authors found'}</div>
+                        </td>
+                        <td>
+                            <div class="missing-fields">
+                                ${p.missing_fields.map(f => `<span class="missing-tag">${f}</span>`).join('') || '<span class="badge badge-success">Complete</span>'}
+                            </div>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                console.error('Error fetching papers:', err);
+            }
+        }
+
+        function getStatusClass(status) {
+            if (status === 'Processed') return 'badge-success';
+            if (status === 'Ingested') return 'badge-warning';
+            return 'badge-danger';
+        }
+
+        document.getElementById('run-btn').addEventListener('click', async () => {
+            const endpoint = isRunning ? 'stop' : 'start';
+            const config = {};
+            if (!isRunning) {
+                // Get toggle values
+                document.querySelectorAll('#toggles input').forEach(input => {
+                    config[input.id] = input.checked;
+                });
+            }
+
+            const res = await fetch(`${API_BASE}/process/${endpoint}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+            await fetchStatus();
+        });
+
+        document.getElementById('sync-btn').addEventListener('click', async () => {
+            await fetch(`${API_BASE}/sync`, { method: 'POST' });
+            alert('Git sync triggered. Check server logs.');
+        });
+
+        // Initialize and Poll
+        fetchStatus();
+        fetchPapers();
+        setInterval(fetchStatus, 3000);
+        setInterval(fetchPapers, 5000);
+
+    </script>
+</body>
+</html>

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Knowledge Graph — AI Research Assistant</title>
+  <meta name="description" content="Interactive semantic knowledge graph of your research library, showing paper proximity, citation links, and cross-subfield structural holes." />
+  <link rel="stylesheet" href="graph.css" />
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Top Bar ──────────────────────────────────────── -->
+  <header id="topbar">
+    <a href="/ui" id="back-btn">← Editor</a>
+    <h1>🔭 Knowledge Graph</h1>
+
+    <div id="stats-bar">
+      <div class="stat-item">
+        <span class="stat-value" id="stat-nodes">—</span>
+        <span>papers</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-value" id="stat-edges">—</span>
+        <span>links</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-value" id="stat-clusters">—</span>
+        <span>clusters</span>
+      </div>
+    </div>
+
+    <div id="build-status">
+      <span class="status-dot pulse" id="status-dot"></span>
+      <span id="status-text">Loading…</span>
+    </div>
+  </header>
+
+  <!-- ── Main Area ────────────────────────────────────── -->
+  <div id="main-area">
+
+    <!-- ── Left Sidebar ─────────────────────────────── -->
+    <aside id="sidebar">
+
+      <!-- Search -->
+      <div class="sidebar-section">
+        <h3>🔍 Search</h3>
+        <input id="search-bar" type="text" placeholder="Filter papers by title…" autocomplete="off" />
+      </div>
+
+      <!-- View Controls -->
+      <div class="sidebar-section">
+        <h3>⚙ View</h3>
+
+        <div class="control-row">
+          <span class="control-label">Min. similarity</span>
+          <span class="control-value" id="threshold-val">0.5</span>
+        </div>
+        <input type="range" id="threshold-slider" min="0" max="100" value="50" step="1" />
+
+        <div style="margin-top:14px;">
+          <div class="toggle-row">
+            <span class="toggle-label">📌 Show citations</span>
+            <label class="toggle">
+              <input type="checkbox" id="toggle-citations" />
+              <span class="toggle-track"></span>
+              <span class="toggle-thumb"></span>
+            </label>
+          </div>
+
+          <div class="toggle-row">
+            <span class="toggle-label">🕳 Highlight gaps</span>
+            <label class="toggle">
+              <input type="checkbox" id="toggle-gaps" />
+              <span class="toggle-track"></span>
+              <span class="toggle-thumb"></span>
+            </label>
+          </div>
+
+          <div class="toggle-row">
+            <span class="toggle-label">🏷 Show labels</span>
+            <label class="toggle">
+              <input type="checkbox" id="toggle-labels" checked />
+              <span class="toggle-track"></span>
+              <span class="toggle-thumb"></span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Processing Stats -->
+      <div class="sidebar-section">
+        <h3>📊 Processing Progress</h3>
+        <div class="progress-item">
+          <div class="progress-label">Authorship Meta</div>
+          <div class="progress-track"><div class="progress-bar" id="pb-authors" style="width: 0%"></div></div>
+          <div class="progress-value" id="val-authors">0/0</div>
+        </div>
+        <div class="progress-item">
+          <div class="progress-label">Publication Year</div>
+          <div class="progress-track"><div class="progress-bar" id="pb-year" style="width: 0%"></div></div>
+          <div class="progress-value" id="val-year">0/0</div>
+        </div>
+        <div class="progress-item">
+          <div class="progress-label">Abstracts/Summaries</div>
+          <div class="progress-track"><div class="progress-bar" id="pb-summary" style="width: 0%"></div></div>
+          <div class="progress-value" id="val-summary">0/0</div>
+        </div>
+        <div class="progress-item">
+          <div class="progress-label">DOI Mapping</div>
+          <div class="progress-track"><div class="progress-bar" id="pb-doi" style="width: 0%"></div></div>
+          <div class="progress-value" id="val-doi">0/0</div>
+        </div>
+      </div>
+
+      <!-- Focus Mode -->
+      <div class="sidebar-section">
+        <h3>🎯 Focus Mode</h3>
+        <div id="focus-info">
+          <strong id="focus-count">0 papers</strong> selected as focus centroid
+        </div>
+        <button class="btn btn-primary" id="btn-focus" disabled>Set as Focus</button>
+        <button class="btn" id="btn-clear-focus" disabled>Clear Focus</button>
+      </div>
+
+      <!-- Rebuild -->
+      <div class="sidebar-section">
+        <h3>🔄 Graph</h3>
+        <button class="btn btn-amber" id="btn-rebuild">Rebuild Graph</button>
+      </div>
+
+      <!-- Cluster Legend -->
+      <div class="sidebar-section">
+        <h3>🎨 Clusters</h3>
+        <div id="cluster-legend"></div>
+      </div>
+
+      <!-- Structural Holes -->
+      <div class="sidebar-section" id="gaps-section" style="display:none;">
+        <h3>🕳 Structural Holes</h3>
+        <div id="gaps-list"></div>
+      </div>
+
+    </aside>
+
+    <!-- ── Graph Canvas ──────────────────────────────── -->
+    <div id="graph-container">
+      <div id="sigma-canvas"></div>
+
+      <!-- Loading overlay -->
+      <div id="loading-overlay">
+        <div class="spinner"></div>
+        <div class="loading-text">Building semantic graph…</div>
+        <div class="loading-sub">This runs once and is cached. Usually 30–60s for large libraries.</div>
+      </div>
+    </div>
+
+    <!-- ── Right: Paper Detail ───────────────────────── -->
+    <aside id="detail-panel" class="hidden">
+      <div id="detail-content">
+        <div class="detail-header">
+          <div class="detail-title" id="detail-title"></div>
+          <button class="detail-close" id="detail-close" aria-label="Close details">✕</button>
+        </div>
+        <div class="detail-meta" id="detail-meta"></div>
+        <div class="detail-summary" id="detail-summary"></div>
+        <button class="btn btn-success" id="detail-open-pdf">📄 Open PDF</button>
+        <button class="btn" id="detail-add-citation">📎 Add to Bibliography</button>
+        <div class="detail-neighbors">
+          <h4>Similar Papers</h4>
+          <div id="neighbor-list"></div>
+        </div>
+      </div>
+    </aside>
+
+  </div><!-- /main-area -->
+</div><!-- /app -->
+
+<!-- Tooltip -->
+<div id="tooltip"></div>
+
+<!-- Sigma.js v2 via CDN (WebGL renderer) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/graphology/0.25.4/graphology.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/graphology-layout/0.6.1/graphology-layout.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/graphology-layout-forceatlas2/0.10.1/graphology-layout-forceatlas2.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sigma.js/2.4.0/sigma.min.js"></script>
+
+<script src="demo.js"></script>
+<script src="graph.js"></script>
+</body>
+</html>
