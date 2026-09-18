@@ -36,6 +36,7 @@ from datetime import datetime
 from graph_module.graph_builder import build_semantic_graph, compute_focus_distances
 from graph_module.citation_fetcher import build_citation_graph
 from graph_module.neighbor_graph import build_neighbor_graph_bow
+from audit_module.claim_auditor import audit_claims
 from config import LIBRARY_DIR, EXTERNAL_LIBRARY_PATH, BOW_INDEX_PATH, CHROMA_DB_PATH
 import threading
 
@@ -97,6 +98,12 @@ class ChatRequest(BaseModel):
     query: str
     context_papers: List[Dict[str, Any]]
     model: Optional[str] = "phi3"
+
+class ClaimAuditRequest(BaseModel):
+    """Manuscript and the analysis text used to substantiate its claims."""
+    manuscript: str
+    analysis: str
+    min_support_score: float = 0.45
 
 # --- Helpers ---
 
@@ -549,6 +556,19 @@ def get_seminal_papers():
         top_seminal.append(info)
 
     return {"seminal_papers": top_seminal}
+
+@app.post("/api/audit/claims", dependencies=[Depends(verify_auth_token)])
+def audit_manuscript_claims(request: ClaimAuditRequest):
+    """Return a human-review queue that grounds draft claims in analysis text."""
+    try:
+        return audit_claims(
+            request.manuscript,
+            request.analysis,
+            min_support_score=request.min_support_score,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
 
 @app.post("/api/search", dependencies=[Depends(verify_auth_token)])
 def search_papers(request: QueryRequest):
