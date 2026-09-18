@@ -18,6 +18,8 @@ dependencies:
   - accelerate
   - huggingface_hub
   - pydantic
+  - matplotlib
+  - pillow
   - mne
   - sentence-transformers
   - fastapi

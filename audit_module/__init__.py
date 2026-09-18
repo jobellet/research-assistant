@@ -6,5 +6,6 @@ and numerical/timeline auditing (quantity drift, grant horizon overruns, sum che
 
 from .prose_auditor import audit_prose
 from .number_auditor import audit_numbers
+from .claim_auditor import audit_claims
 
-__all__ = ["audit_prose", "audit_numbers"]
+__all__ = ["audit_prose", "audit_numbers", "audit_claims"]
