@@ -3,18 +3,20 @@ import os
 import logging
 from pathlib import Path
 from db_module.db_manager import DBManager
+from config import CHROMA_DB_PATH, LIBRARY_DIR
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class SemanticSearcher:
-    def __init__(self, db_path="./chroma_db", library_dir="./library"):
+    def __init__(self, db_path=None, library_dir=None):
         """
         Initialize the searcher with access to ChromaDB and the library filesystem.
         """
-        self.db_manager = DBManager(db_path=db_path)
-        self.library_dir = Path(library_dir)
+        self.db_path = db_path or CHROMA_DB_PATH
+        self.db_manager = DBManager(db_path=self.db_path)
+        self.library_dir = Path(library_dir) if library_dir else LIBRARY_DIR
 
     def find_all_pdfs(self, hash_id, pdf_filename=None):
         """

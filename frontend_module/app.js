@@ -59,25 +59,12 @@ const fileListItems = document.querySelectorAll("#file-list .nav-item");
 // Chat & Library UI Elements
 const tabLibrary = document.getElementById("tab-library");
 const tabMatches = document.getElementById("tab-matches");
-const tabChat = document.getElementById("tab-chat");
-const tabPotd = document.getElementById("tab-potd");
-const tabSeminal = document.getElementById("tab-seminal");
 const libraryContainer = document.getElementById("library-container");
 const librarySearchInput = document.getElementById("library-search-input");
 const libraryFilterYear = document.getElementById("library-filter-year");
 const libraryFilterAuthor = document.getElementById("library-filter-author");
 const libraryFilterJournal = document.getElementById("library-filter-journal");
 const libraryList = document.getElementById("library-list");
-const chatContainer = document.getElementById("chat-container");
-const potdContainer = document.getElementById("potd-container");
-const seminalContainer = document.getElementById("seminal-container");
-const potdList = document.getElementById("potd-list");
-const seminalList = document.getElementById("seminal-list");
-const chatMessages = document.getElementById("chat-messages");
-const chatInput = document.getElementById("chat-input");
-const btnSendChat = document.getElementById("btn-send-chat");
-const btnActivateAi = document.getElementById("btn-activate-ai");
-const aiStatus = document.getElementById("ai-status");
 const btnSearchFilter = document.getElementById("btn-search-filter");
 const btnSearchSemantic = document.getElementById("btn-search-semantic");
 const btnSearchFreq = document.getElementById("btn-search-freq");
@@ -169,7 +156,11 @@ async function init() {
     if (e.key === "Enter") createProject();
   });
   newProjectName.addEventListener("input", (e) => {
-    btnCreateProject.disabled = !e.target.value.trim();
+    const isEmpty = !e.target.value.trim();
+    btnCreateProject.disabled = isEmpty;
+    btnCreateProject.title = isEmpty
+      ? "Type a project name to create"
+      : "Create project";
   });
   btnDeleteProject.addEventListener("click", deleteProject);
 
@@ -194,52 +185,20 @@ async function init() {
   await loadProjects();
 
   // Wire up Side Panel Tabs
-  if (tabMatches && tabChat && tabLibrary && tabPotd) {
+  if (tabLibrary && tabMatches) {
     tabLibrary.addEventListener("click", () => {
       switchSidePanel("library");
       librarySearchInput.focus();
     });
     tabMatches.addEventListener("click", () => switchSidePanel("matches"));
-    tabChat.addEventListener("click", () => {
-      switchSidePanel("chat");
-      chatInput.focus();
-    });
-    tabPotd.addEventListener("click", () => {
-      switchSidePanel("potd");
-      loadPOTD();
-    });
-    tabSeminal.addEventListener("click", () => {
-      switchSidePanel("seminal");
-      loadSeminal();
-    });
 
     librarySearchInput.addEventListener("input", handleLibrarySearch);
-    librarySearchInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        handleLibrarySearch(e);
-      }
-    });
     if (libraryFilterYear)
       libraryFilterYear.addEventListener("input", handleLibrarySearch);
     if (libraryFilterAuthor)
       libraryFilterAuthor.addEventListener("input", handleLibrarySearch);
     if (libraryFilterJournal)
       libraryFilterJournal.addEventListener("input", handleLibrarySearch);
-    btnSendChat.addEventListener("click", sendChatMessage);
-    chatInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        sendChatMessage();
-      }
-    });
-    chatInput.addEventListener("input", (e) => {
-      const hasText = !!e.target.value.trim();
-      btnSendChat.disabled = !hasText;
-      btnSendChat.title = hasText
-        ? "Send message (Enter)"
-        : "Type a message to send";
-    });
 
     // Zotero-like Keyboard Shortcut (Cmd+K or Ctrl+K)
     window.addEventListener("keydown", (e) => {
@@ -253,12 +212,22 @@ async function init() {
     if (btnSearchFilter && btnSearchSemantic && btnSearchFreq) {
       const updateMode = (method) => {
         state.searchMethod = method;
-        [btnSearchFilter, btnSearchSemantic, btnSearchFreq].forEach((b) =>
-          b.classList.remove("active"),
-        );
-        if (method === "filter") btnSearchFilter.classList.add("active");
-        if (method === "semantic") btnSearchSemantic.classList.add("active");
-        if (method === "bow") btnSearchFreq.classList.add("active");
+        [btnSearchFilter, btnSearchSemantic, btnSearchFreq].forEach((b) => {
+          b.classList.remove("active");
+          b.setAttribute("aria-pressed", "false");
+        });
+        if (method === "filter") {
+          btnSearchFilter.classList.add("active");
+          btnSearchFilter.setAttribute("aria-pressed", "true");
+        }
+        if (method === "semantic") {
+          btnSearchSemantic.classList.add("active");
+          btnSearchSemantic.setAttribute("aria-pressed", "true");
+        }
+        if (method === "bow") {
+          btnSearchFreq.classList.add("active");
+          btnSearchFreq.setAttribute("aria-pressed", "true");
+        }
 
         // Trigger search with current input
         handleLibrarySearch({ target: librarySearchInput });
@@ -267,12 +236,6 @@ async function init() {
       btnSearchFilter.addEventListener("click", () => updateMode("filter"));
       btnSearchSemantic.addEventListener("click", () => updateMode("semantic"));
       btnSearchFreq.addEventListener("click", () => updateMode("bow"));
-    }
-
-    if (btnActivateAi) {
-      btnActivateAi.addEventListener("click", toggleAiWorker);
-      checkAiStatus();
-      setInterval(checkAiStatus, 10000);
     }
   }
 
@@ -336,82 +299,15 @@ function switchMobileView(view) {
   } else if (view === "matches") {
     sidePanel.classList.add("mobile-active");
     switchSidePanel("matches");
-  } else if (view === "chat") {
-    sidePanel.classList.add("mobile-active");
-    switchSidePanel("chat");
-  }
-}
-
-// =============================================================================
-// CHAT & RAG
-// =============================================================================
-
-async function checkAiStatus() {
-  try {
-    const res = await fetch(`${CONFIG.API_BASE}/api/chat/status`, {
-      headers: authHeaders(),
-    });
-    const data = await res.json();
-
-    if (data.status === "ready") {
-      aiStatus.textContent = "Status: Active (GPU Running)";
-      aiStatus.style.color = "#10b981";
-      btnActivateAi.textContent = "Deactivate AI Chat";
-      btnActivateAi.style.background = "var(--bg-hover)";
-      btnActivateAi.style.color = "var(--text-primary)";
-      btnActivateAi.disabled = false;
-    } else if (data.status === "starting") {
-      aiStatus.textContent = "Status: Provisioning GPU... (approx. 30s)";
-      aiStatus.style.color = "#fbbf24";
-      btnActivateAi.textContent = "Provisioning...";
-      btnActivateAi.disabled = true;
-    } else {
-      aiStatus.textContent = "Status: Offline";
-      aiStatus.style.color = "var(--text-secondary)";
-      btnActivateAi.textContent = "Activate AI Chat (GPU)";
-      btnActivateAi.style.background = "var(--accent-color)";
-      btnActivateAi.style.color = "white";
-      btnActivateAi.disabled = false;
-    }
-  } catch (e) {
-    console.error("Failed to check AI status", e);
-  }
-}
-
-async function toggleAiWorker() {
-  try {
-    const isOffline = aiStatus.textContent.includes("Offline");
-    const endpoint = isOffline ? "/api/chat/start" : "/api/chat/stop";
-
-    btnActivateAi.disabled = true;
-    aiStatus.textContent = isOffline
-      ? "Status: Requesting GPU node..."
-      : "Status: Stopping GPU node...";
-
-    await fetch(`${CONFIG.API_BASE}${endpoint}`, {
-      method: "POST",
-      headers: authHeaders(),
-    });
-
-    checkAiStatus();
-  } catch (e) {
-    console.error("Failed to toggle AI worker", e);
-    btnActivateAi.disabled = false;
   }
 }
 
 function switchSidePanel(tab) {
-  [tabLibrary, tabMatches, tabChat, tabPotd, tabSeminal].forEach((t) => {
+  [tabLibrary, tabMatches].forEach((t) => {
     t.classList.remove("active");
     t.setAttribute("aria-selected", "false");
   });
-  [
-    libraryContainer,
-    resultsContainer,
-    chatContainer,
-    potdContainer,
-    seminalContainer,
-  ].forEach((c) => {
+  [libraryContainer, resultsContainer].forEach((c) => {
     c.classList.remove("active-content");
     c.style.display = "none";
   });
@@ -437,89 +333,6 @@ function switchSidePanel(tab) {
       const btnMatches = document.getElementById("mobile-btn-matches");
       if (btnMatches) btnMatches.classList.add("active");
     }
-  } else if (tab === "chat") {
-    tabChat.classList.add("active");
-    tabChat.setAttribute("aria-selected", "true");
-    chatContainer.classList.add("active-content");
-    chatContainer.style.display = "flex";
-    if (state.isMobile) {
-      // Ensure mobile nav is synced
-      mobileNavItems.forEach((i) => i.classList.remove("active"));
-      document.getElementById("mobile-btn-chat").classList.add("active");
-    }
-  } else if (tab === "potd") {
-    tabPotd.classList.add("active");
-    tabPotd.setAttribute("aria-selected", "true");
-    potdContainer.classList.add("active-content");
-    potdContainer.style.display = "block";
-  } else if (tab === "seminal") {
-    tabSeminal.classList.add("active");
-    tabSeminal.setAttribute("aria-selected", "true");
-    seminalContainer.classList.add("active-content");
-    seminalContainer.style.display = "block";
-  }
-}
-
-async function sendChatMessage() {
-  const query = chatInput.value.trim();
-  if (!query) return;
-
-  const userMsg = document.createElement("div");
-  userMsg.className = "chat-message user-msg";
-  userMsg.textContent = query;
-  chatMessages.appendChild(userMsg);
-  chatInput.value = "";
-  btnSendChat.disabled = true;
-
-  const aiMsg = document.createElement("div");
-  aiMsg.className = "chat-message assistant-msg";
-  aiMsg.textContent = "Thinking...";
-  chatMessages.appendChild(aiMsg);
-  chatMessages.scrollTop = chatMessages.scrollHeight;
-
-  // Set loading state
-  btnSendChat.disabled = true;
-  chatInput.disabled = true;
-  btnSendChat.setAttribute("aria-busy", "true");
-  chatInput.setAttribute("aria-busy", "true");
-
-  try {
-    const response = await fetch(`${CONFIG.API_BASE}/api/chat`, {
-      method: "POST",
-      headers: authHeaders(),
-      body: JSON.stringify({
-        query: query,
-        context_papers: state.results || [],
-      }),
-    });
-
-    if (!response.ok) throw new Error("Chat API Error");
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder("utf-8");
-    aiMsg.textContent = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value, { stream: true });
-      aiMsg.textContent += chunk;
-      chatMessages.scrollTop = chatMessages.scrollHeight;
-    }
-  } catch (e) {
-    console.error("Chat error:", e);
-    aiMsg.textContent = "Error connecting to the chat service.";
-  } finally {
-    // Remove loading state
-    const hasText = !!chatInput.value.trim();
-    btnSendChat.disabled = !hasText;
-    btnSendChat.title = hasText
-      ? "Send message (Enter)"
-      : "Type a message to send";
-    chatInput.disabled = false;
-    btnSendChat.removeAttribute("aria-busy");
-    chatInput.removeAttribute("aria-busy");
-    chatInput.focus();
   }
 }
 
@@ -624,6 +437,7 @@ function showNewProjectModal() {
   newProjectModal.classList.remove("hidden");
   newProjectName.value = "";
   btnCreateProject.disabled = true;
+  btnCreateProject.title = "Type a project name to create";
   newProjectName.focus();
 }
 
@@ -649,7 +463,11 @@ async function createProject() {
     projectSelect.value = name;
     await switchProject(name, false);
   } finally {
-    btnCreateProject.disabled = !newProjectName.value.trim();
+    const isEmpty = !newProjectName.value.trim();
+    btnCreateProject.disabled = isEmpty;
+    btnCreateProject.title = isEmpty
+      ? "Type a project name to create"
+      : "Create project";
     newProjectName.disabled = false;
     btnCreateProject.removeAttribute("aria-busy");
     newProjectName.removeAttribute("aria-busy");
@@ -743,6 +561,8 @@ function switchView(view) {
     graphWorkspace.style.display = "none";
     btnEditor.classList.add("active-view");
     btnGraph.classList.remove("active-view");
+    btnEditor.setAttribute("aria-selected", "true");
+    btnGraph.setAttribute("aria-selected", "false");
     if (state.isMobile) {
       mobileNavItems.forEach((i) => i.classList.remove("active"));
       document.getElementById("mobile-btn-editor").classList.add("active");
@@ -752,6 +572,8 @@ function switchView(view) {
     graphWorkspace.style.display = "block";
     btnEditor.classList.remove("active-view");
     btnGraph.classList.add("active-view");
+    btnEditor.setAttribute("aria-selected", "false");
+    btnGraph.setAttribute("aria-selected", "true");
     if (state.isMobile) {
       mobileNavItems.forEach((i) => i.classList.remove("active"));
       document.getElementById("mobile-btn-graph").classList.add("active");
@@ -1074,10 +896,8 @@ function renderResults(results) {
 
 window.openQuickGraph = (hash_id) => {
   if (graphModal && graphFrame) {
+    graphFrame.src = `/ui/graph.html?neighbor_id=${hash_id}&token=${CONFIG.AUTH_TOKEN}`;
     graphModal.style.display = "flex";
-    setTimeout(() => {
-      graphFrame.src = `/ui/graph.html?neighbor_id=${hash_id}&token=${CONFIG.AUTH_TOKEN}`;
-    }, 50);
   } else {
     window.open(
       `/ui/graph.html?neighbor_id=${hash_id}&token=${CONFIG.AUTH_TOKEN}`,
@@ -1209,17 +1029,6 @@ function renderGraph(data) {
     .attr("height", "100%")
     .attr("viewBox", `0 0 ${width} ${height}`);
 
-  const gContainer = svg.append("g");
-
-  // Add zoom and pan support
-  const zoom = d3
-    .zoom()
-    .scaleExtent([0.1, 8])
-    .on("zoom", (event) => {
-      gContainer.attr("transform", event.transform);
-    });
-  svg.call(zoom);
-
   // Adapt formats
   const links = (data.links || data.edges || []).map((d) => ({
     source: d.source,
@@ -1233,9 +1042,6 @@ function renderGraph(data) {
     label: d.title || d.label || d.name || d.id || d.hash_id,
   }));
 
-  const chargeStrength = nodes.length > 500 ? -20 : (nodes.length > 100 ? -50 : -150);
-  const linkDistance = nodes.length > 500 ? 50 : 100;
-
   const simulation = d3
     .forceSimulation(nodes)
     .force(
@@ -1243,13 +1049,12 @@ function renderGraph(data) {
       d3
         .forceLink(links)
         .id((d) => d.id)
-        .distance(linkDistance),
+        .distance(100),
     )
-    .force("charge", d3.forceManyBody().strength(chargeStrength).distanceMax(300))
-    .force("collide", d3.forceCollide(10))
+    .force("charge", d3.forceManyBody().strength(-200))
     .force("center", d3.forceCenter(width / 2, height / 2));
 
-  const link = gContainer
+  const link = svg
     .append("g")
     .attr("stroke", "#475569")
     .attr("stroke-opacity", 0.4)
@@ -1258,7 +1063,7 @@ function renderGraph(data) {
     .join("line")
     .attr("stroke-width", (d) => Math.sqrt(d.value));
 
-  const node = gContainer
+  const node = svg
     .append("g")
     .selectAll("g")
     .data(nodes)
@@ -1273,7 +1078,7 @@ function renderGraph(data) {
 
   node
     .append("circle")
-    .attr("r", (d) => (d.hash_id ? 6 : 4))
+    .attr("r", 8)
     .attr("fill", (d) => d.cluster_color || "var(--accent-color)")
     .attr("stroke", "#fff")
     .attr("stroke-width", 1);
@@ -1283,7 +1088,7 @@ function renderGraph(data) {
     .text((d) =>
       d.label.length > 20 ? d.label.substring(0, 20) + "…" : d.label,
     )
-    .attr("x", 10)
+    .attr("x", 12)
     .attr("y", 4)
     .attr("fill", "#94a3b8")
     .style("font-size", "10px")
@@ -1292,7 +1097,7 @@ function renderGraph(data) {
   node.append("title").text((d) => d.label);
 
   node.on("click", (event, d) => {
-    if (d.hash_id && window.openQuickGraph) {
+    if (d.hash_id) {
       window.openQuickGraph(d.hash_id);
     }
   });
@@ -1322,126 +1127,6 @@ function renderGraph(data) {
     if (!event.active) simulation.alphaTarget(0);
     d.fx = null;
     d.fy = null;
-  }
-}
-
-async function loadSeminal() {
-  const btn = document.getElementById("btn-refresh-seminal");
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = "Refreshing...";
-    btn.setAttribute("aria-busy", "true");
-  }
-
-  seminalList.innerHTML =
-    '<div class="text-secondary" style="text-align:center; padding: 2rem;">Identifying seminal works...</div>';
-
-  try {
-    const response = await fetch(`${CONFIG.API_BASE}/api/seminal_papers`, {
-      headers: { "x-auth-token": CONFIG.AUTH_TOKEN },
-    });
-    const data = await response.json();
-    const papers = data.seminal_papers || [];
-
-    seminalList.innerHTML = "";
-
-    if (papers.length === 0) {
-      seminalList.innerHTML = `
-        <div class="empty-state" style="text-align: center; padding: 2rem 1rem;">
-          <div style="font-size: 2rem; margin-bottom: 1rem;" aria-hidden="true">🏛️</div>
-          <div class="text-secondary" style="margin-bottom: 0.5rem; font-weight: 500;">No seminal papers identified yet</div>
-          <div style="font-size: 0.85rem; color: var(--text-secondary); opacity: 0.8;">Add more papers to your library to discover foundational works.</div>
-        </div>
-      `;
-      return;
-    }
-
-    papers.forEach((paper) => {
-      const card = document.createElement("div");
-      card.className = "paper-card";
-
-      card.innerHTML = `
-                <div class="result-title">${paper.title}</div>
-                <div class="result-summary" style="margin-top:0.5rem; font-size:0.8rem;">
-                    <strong>Cited ${paper.cite_count} times</strong> by papers in your library.
-                    <br>DOI: ${paper.doi || "N/A"}
-                </div>
-                <div class="result-footer" style="margin-top:1rem;">
-                    ${paper.doi ? `<a href="https://doi.org/${paper.doi}" target="_blank" class="view-btn" style="text-decoration:none; background: var(--accent-color); color:white;">Open DOI</a>` : `<span class="text-secondary">DOI not found</span>`}
-                </div>
-            `;
-      seminalList.appendChild(card);
-    });
-  } catch (error) {
-    console.error("Failed to load Seminal Papers:", error);
-    seminalList.innerHTML =
-      '<div class="text-secondary" style="text-align:center; color: #ef4444; padding: 2rem;">Error loading data.</div>';
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = "Refresh Seminal";
-      btn.removeAttribute("aria-busy");
-    }
-  }
-}
-
-async function loadPOTD() {
-  const btn = document.getElementById("btn-refresh-potd");
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = "Refreshing...";
-    btn.setAttribute("aria-busy", "true");
-  }
-
-  potdList.innerHTML =
-    '<div class="text-secondary" style="text-align:center; padding: 2rem;">Analyzing citations...</div>';
-
-  try {
-    const response = await fetch(`${CONFIG.API_BASE}/api/papers_of_the_day`, {
-      headers: { "x-auth-token": CONFIG.AUTH_TOKEN },
-    });
-    const data = await response.json();
-    const papers = data.papers_of_the_day || [];
-
-    potdList.innerHTML = "";
-
-    if (papers.length === 0) {
-      potdList.innerHTML = `
-        <div class="empty-state" style="text-align: center; padding: 2rem 1rem;">
-          <div style="font-size: 2rem; margin-bottom: 1rem;" aria-hidden="true">🌟</div>
-          <div class="text-secondary" style="margin-bottom: 0.5rem; font-weight: 500;">No new papers discovered yet</div>
-          <div style="font-size: 0.85rem; color: var(--text-secondary); opacity: 0.8;">Check back later as your library grows for new recommendations.</div>
-        </div>
-      `;
-      return;
-    }
-
-    papers.forEach((paper) => {
-      const card = document.createElement("div");
-      card.className = "paper-card";
-
-      card.innerHTML = `
-                <div class="result-title">${paper.title}</div>
-                <div class="result-summary" style="margin-top:0.5rem; font-size:0.8rem;">
-                    <strong>Cited by ${paper.citation_count} papers</strong> in your library.
-                    <br>Year: ${paper.year || "Unknown"} | DOI: ${paper.doi || "N/A"}
-                </div>
-                <div class="result-footer" style="margin-top:1rem;">
-                    <a href="https://doi.org/${paper.doi}" target="_blank" class="view-btn" style="text-decoration:none; background: var(--accent-color); color:white;">Open DOI</a>
-                </div>
-            `;
-      potdList.appendChild(card);
-    });
-  } catch (error) {
-    console.error("Failed to load POTD:", error);
-    potdList.innerHTML =
-      '<div class="text-secondary" style="text-align:center; color: #ef4444; padding: 2rem;">Error loading data.</div>';
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = "Refresh POTD";
-      btn.removeAttribute("aria-busy");
-    }
   }
 }
 

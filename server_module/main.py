@@ -36,6 +36,7 @@ from datetime import datetime
 from graph_module.graph_builder import build_semantic_graph, compute_focus_distances
 from graph_module.citation_fetcher import build_citation_graph
 from graph_module.neighbor_graph import build_neighbor_graph_bow
+from config import LIBRARY_DIR, EXTERNAL_LIBRARY_PATH, BOW_INDEX_PATH, CHROMA_DB_PATH
 import threading
 
 # Configure logging
@@ -52,21 +53,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request as StarletteRequest
-
-class NoCacheStaticMiddleware(BaseHTTPMiddleware):
-    """Disable browser caching for /ui/ static files during development."""
-    async def dispatch(self, request: StarletteRequest, call_next):
-        response = await call_next(request)
-        if request.url.path.startswith("/ui/"):
-            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-            response.headers["Pragma"] = "no-cache"
-            response.headers["Expires"] = "0"
-        return response
-
-app.add_middleware(NoCacheStaticMiddleware)
 
 # Global instances
 mutex = ServerMutex()
@@ -185,7 +171,7 @@ def startup_event():
 
     # 3. Initialize Processor
     try:
-        processor = ManuscriptProcessor(library_dir="library", inbox_dir="inbox")
+        processor = ManuscriptProcessor(library_dir=LIBRARY_DIR, inbox_dir=EXTERNAL_LIBRARY_PATH)
         logger.info("Processor initialized.")
     except Exception as e:
         logger.error(f"Failed to initialize processor: {e}")
@@ -235,7 +221,7 @@ def health_check():
 
 @app.get("/api/stats")
 async def get_library_stats():
-    library_dir = Path("library")
+    library_dir = LIBRARY_DIR
     if not library_dir.exists():
         return {"error": "Library directory not found"}
         
@@ -581,22 +567,44 @@ def search_papers(request: QueryRequest):
         if request.journal:
             filters["journal"] = request.journal
 
-        # 2. Parse explicit field prefixes (author:xxx, year:yyyy, journal:zzz) from query string if present
-        clean_query = request.query
-        author_match = re.search(r'\bauthor:([^\s]+)', clean_query, re.IGNORECASE)
-        if author_match and "author" not in filters:
-            filters["author"] = author_match.group(1).strip()
-            clean_query = clean_query.replace(author_match.group(0), "").strip()
+        # 2. Add implicit filters from query text
+        # Check for year
+        if "year" not in filters:
+            year_match = re.search(r'\b(19\d{2}|20\d{2})\b', request.query)
+            if year_match:
+                filters["year"] = int(year_match.group(1))
 
-        year_prefix_match = re.search(r'\byear:(\d{4})\b', clean_query, re.IGNORECASE)
-        if year_prefix_match and "year" not in filters:
-            filters["year"] = int(year_prefix_match.group(1))
-            clean_query = clean_query.replace(year_prefix_match.group(0), "").strip()
+        # Check for known authors
+        if "author" not in filters:
+            known_authors = set()
+            inventory_path = Path("papers_inventory.csv")
+            if inventory_path.exists():
+                try:
+                    with open(inventory_path, 'r', encoding='utf-8') as f:
+                        reader = csv.DictReader(f)
+                        for row in reader:
+                            author_str = row.get("authors", "")
+                            if author_str:
+                                # Simple split by comma or semicolon
+                                for a in author_str.replace(";", ",").split(","):
+                                    a = a.strip()
+                                    if a:
+                                        # only add simple last names or specific words
+                                        for word in a.split():
+                                            if len(word) > 2:
+                                                known_authors.add(word.lower())
+                except:
+                    pass
 
-        journal_match = re.search(r'\bjournal:([^\s]+)', clean_query, re.IGNORECASE)
-        if journal_match and "journal" not in filters:
-            filters["journal"] = journal_match.group(1).strip()
-            clean_query = clean_query.replace(journal_match.group(0), "").strip()
+            query_words = request.query.lower().split()
+            found_author = None
+            for word in query_words:
+                if word in known_authors and word not in ["the", "and", "for", "with"]:
+                    found_author = word
+                    break
+
+            if found_author:
+                filters["author"] = found_author
 
         # 3. Construct ChromaDB `where` clause
         where_clause = None
@@ -623,7 +631,7 @@ def search_papers(request: QueryRequest):
             
             # Bow search returns list of {hash_id, score, method}
             # Retrieve more to account for post-filtering
-            results = bow_searcher.search(clean_query, top_k=request.n_results * 5)
+            results = bow_searcher.search(request.query, top_k=request.n_results * 5)
             
             # Enrich results with metadata and files using existing searcher logic
             enriched = []
@@ -661,7 +669,7 @@ def search_papers(request: QueryRequest):
                 })
             return enriched
         else:
-            return searcher.search(clean_query, n_results=request.n_results, where=where_clause)
+            return searcher.search(request.query, n_results=request.n_results, where=where_clause)
     except Exception as e:
         logger.error(f"Search failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -944,102 +952,6 @@ def get_neighbor_graph(hash_id: str):
         return build_neighbor_graph_bow(hash_id, bow_searcher, searcher.db_manager, top_n=50)
     except Exception as e:
         logger.error(f"Failed to build neighbor graph for {hash_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# --- Grant Toolkit Endpoints ---
-
-@app.post("/api/audit/prose", dependencies=[Depends(verify_auth_token)])
-async def api_audit_prose(payload: dict):
-    """Audit text or project draft for formulaic AI connectives, empty negatives, voice, rhythm, and mechanical errors."""
-    try:
-        from audit_module.prose_auditor import audit_prose
-        text = payload.get("text", "")
-        project_name = payload.get("project_name")
-        section = payload.get("section")
-        
-        if not text and project_name:
-            p_dir = get_project_path(project_name)
-            draft_file = p_dir / "draft.tex"
-            if draft_file.exists():
-                text = draft_file.read_text(encoding="utf-8")
-        if not text:
-            raise HTTPException(status_code=400, detail="No text or valid project draft provided.")
-            
-        return audit_prose(text, section=section)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to audit prose: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/audit/numbers", dependencies=[Depends(verify_auth_token)])
-async def api_audit_numbers(payload: dict):
-    """Audit numbers, timeline overruns against grant duration, sum checks, and backwards ranges."""
-    try:
-        from audit_module.number_auditor import audit_numbers
-        text = payload.get("text", "")
-        project_name = payload.get("project_name")
-        horizon = payload.get("horizon", 36)
-        
-        if not text and project_name:
-            p_dir = get_project_path(project_name)
-            draft_file = p_dir / "draft.tex"
-            if draft_file.exists():
-                text = draft_file.read_text(encoding="utf-8")
-        if not text:
-            raise HTTPException(status_code=400, detail="No text or valid project draft provided.")
-            
-        return audit_numbers(text, horizon=int(horizon))
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to audit numbers: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/comments/extract", dependencies=[Depends(verify_auth_token)])
-async def api_extract_comments(payload: dict):
-    """Extract native PDF annotations and baked-in margin comments from a PDF file."""
-    try:
-        from toolkit_module.pdf_comments import extract_pdf_comments
-        pdf_path = payload.get("pdf_path")
-        if not pdf_path or not os.path.exists(pdf_path):
-            raise HTTPException(status_code=400, detail="Valid pdf_path is required.")
-        return extract_pdf_comments(pdf_path)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to extract PDF comments: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/schedule/generate", dependencies=[Depends(verify_auth_token)])
-async def api_generate_schedule(payload: dict):
-    """Render a DFG-style Work Schedule Gantt chart as a PNG image."""
-    try:
-        from toolkit_module.schedule_generator import generate_schedule_chart
-        config = payload.get("config")
-        out_path = payload.get("output_path", "figures/work_schedule.png")
-        return generate_schedule_chart(config=config, output_path=out_path)
-    except Exception as e:
-        logger.error(f"Failed to generate schedule chart: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/figure/fit", dependencies=[Depends(verify_auth_token)])
-async def api_figure_fit(payload: dict):
-    """Calculate figure height, text column scaling, and page budget fraction."""
-    try:
-        from toolkit_module.figure_fit import calculate_figure_fit
-        images = payload.get("images", [])
-        if not images:
-            raise HTTPException(status_code=400, detail="List of image paths is required.")
-        tw = float(payload.get("text_width_cm", 16.0))
-        th = float(payload.get("text_height_cm", 24.0))
-        wf = float(payload.get("width_frac", 1.0))
-        bg = float(payload.get("budget_page_frac", 0.25))
-        return calculate_figure_fit(images, text_width_cm=tw, text_height_cm=th, width_frac=wf, budget_page_frac=bg)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to calculate figure fit: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # --- Frontend & Dashboard Static Files ---

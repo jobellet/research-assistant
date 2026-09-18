@@ -100,7 +100,22 @@ def process_paper(hash_dir: Path, model: str, overwrite: bool, delete_pdf: bool,
             except Exception as e:
                 return f"Failed to save metadata for {hash_dir.name}: {e}"
         else:
-            logger.warning(f"No verified metadata found in online databases for {hash_dir.name}")
+            logger.warning(f"No verified metadata found in online databases for {hash_dir.name}. Writing fallback metadata.")
+            fallback_meta = {
+                "title": pdf_path.stem.replace("_", " ").replace("-", " "),
+                "authors": [],
+                "year": "",
+                "doi": "",
+                "keywords": [],
+                "summary": "",
+                "pdf_filename": pdf_path.name,
+                "verified": False
+            }
+            try:
+                with open(metadata_path, "w") as f:
+                    json.dump(fallback_meta, f, indent=4)
+            except Exception as e:
+                logger.error(f"Failed to save fallback metadata for {hash_dir.name}: {e}")
 
     # Step 3: Optionally delete PDF (only if it's the local copied one)
     if delete_pdf and pdf_path.parent == hash_dir:
@@ -123,12 +138,14 @@ def main(library_dir: str, model: str, overwrite: bool, delete_pdf: bool, worker
 
     hash_dirs = [d for d in library_path.iterdir() if d.is_dir() and len(d.name) == 64]
     
+    # Filter out already extracted papers unless overwrite=True
+    if not overwrite:
+        hash_dirs = [d for d in hash_dirs if not ((d / "metadata.json").exists() and (d / "full_text.txt").exists())]
+
     if max_papers:
-        if not overwrite:
-            hash_dirs = [d for d in hash_dirs if not (d / "metadata.json").exists()]
         hash_dirs = hash_dirs[:max_papers]
         
-    logger.info(f"Found {len(hash_dirs)} hash directories to process in library.")
+    logger.info(f"Found {len(hash_dirs)} hash directories needing extraction.")
 
     success_count = 0
     with ThreadPoolExecutor(max_workers=workers) as executor:

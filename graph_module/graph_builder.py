@@ -18,10 +18,11 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
+from config import GRAPH_CACHE_PATH
 
 logger = logging.getLogger(__name__)
 
-CACHE_PATH = Path("./library/graph_cache.json")
+CACHE_PATH = GRAPH_CACHE_PATH
 CACHE_TTL_SECONDS = 3600 * 24  # Rebuild at most every 24 hours on server auto-start
 
 

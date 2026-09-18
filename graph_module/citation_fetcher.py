@@ -19,10 +19,11 @@ from pathlib import Path
 from typing import Optional
 
 import requests
+from config import CITATION_GRAPH_PATH
 
 logger = logging.getLogger(__name__)
 
-CITATION_CACHE_PATH = Path("./library/citation_graph.json")
+CITATION_CACHE_PATH = CITATION_GRAPH_PATH
 SS_BASE = "https://api.semanticscholar.org/v1"
 SS_GRAPH = "https://api.semanticscholar.org/graph/v1"
 REQUEST_DELAY = 0.35  # seconds between requests to respect rate limit

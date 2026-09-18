@@ -3,15 +3,21 @@ import json
 import csv
 import logging
 from pathlib import Path
+import sys
+
+# Ensure repo root is on sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from config import LIBRARY_DIR, DATA_DIR
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("inventory_gen")
 
-def main(library_dir="library", output_file="papers_inventory.csv"):
-    lib_path = Path(library_dir)
+def main(library_dir=None, output_file=None):
+    lib_path = Path(library_dir) if library_dir else LIBRARY_DIR
+    out_file = Path(output_file) if output_file else (DATA_DIR / "papers_inventory.csv")
     if not lib_path.exists():
-        logger.error(f"Library directory not found: {library_dir}")
+        logger.error(f"Library directory not found: {lib_path}")
         return
 
     papers = []
@@ -70,13 +76,14 @@ def main(library_dir="library", output_file="papers_inventory.csv"):
 
     # Write to CSV
     try:
-        with open(output_file, "w", newline="", encoding="utf-8") as f:
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_file, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=headers)
             writer.writeheader()
             writer.writerows(papers)
-        logger.info(f"Successfully generated inventory: {output_file} ({len(papers)} papers)")
+        logger.info(f"Inventory saved: {out_file} ({len(papers)} papers)")
     except Exception as e:
-        logger.error(f"Failed to write CSV: {e}")
+        logger.error(f"Failed to write inventory CSV: {e}")
 
 if __name__ == "__main__":
     import sys

@@ -65,7 +65,7 @@
             aria-label="New project name"
           />
           <div class="inline-modal-actions">
-            <button id="btn-create-project" class="action-btn-sm" disabled>
+            <button id="btn-create-project" class="action-btn-sm" disabled title="Type a project name to create">
               Create
             </button>
             <button id="btn-cancel-project" class="action-btn-sm secondary">
@@ -130,16 +130,13 @@
               >
             </div>
           </div>
-          <nav class="header-actions desktop-only">
-            <button id="btn-editor" class="view-btn active-view">Editor</button>
-            <button id="btn-graph" class="view-btn">Knowledge Graph</button>
+          <nav class="header-actions desktop-only" role="tablist">
+            <button id="btn-editor" class="view-btn active-view" role="tab" aria-selected="true" aria-controls="editor-workspace">Editor</button>
+            <button id="btn-graph" class="view-btn" role="tab" aria-selected="false" aria-controls="graph-workspace">Knowledge Graph</button>
           </nav>
-          <div class="actions">
-            <button id="auth-btn" class="view-btn">Login</button>
-          </div>
         </header>
 
-        <div class="editor-wrapper" id="editor-workspace">
+        <div class="editor-wrapper" id="editor-workspace" role="tabpanel" aria-labelledby="btn-editor">
           <textarea
             id="latex-editor"
             placeholder="Start typing your LaTeX manuscript here... Highlight text to search your library."
@@ -148,7 +145,7 @@
         </div>
 
         <!-- Knowledge Graph Workspace -->
-        <div id="graph-workspace">
+        <div id="graph-workspace" role="tabpanel" aria-labelledby="btn-graph">
           <svg
             id="graph-canvas"
             role="img"
@@ -243,22 +240,6 @@
             </svg>
             <span>Graph</span>
           </button>
-          <button id="mobile-btn-chat" class="mobile-nav-item" data-view="chat">
-            <svg
-              aria-hidden="true"
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <path
-                d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
-              ></path>
-            </svg>
-            <span>AI Chat</span>
-          </button>
         </nav>
       </main>
 
@@ -282,33 +263,6 @@
             aria-selected="false"
           >
             Matches
-          </button>
-          <button
-            id="tab-chat"
-            class="panel-tab"
-            role="tab"
-            aria-controls="chat-container"
-            aria-selected="false"
-          >
-            Ask AI
-          </button>
-          <button
-            id="tab-potd"
-            class="panel-tab"
-            role="tab"
-            aria-controls="potd-container"
-            aria-selected="false"
-          >
-            POTD
-          </button>
-          <button
-            id="tab-seminal"
-            class="panel-tab"
-            role="tab"
-            aria-controls="seminal-container"
-            aria-selected="false"
-          >
-            Seminal
           </button>
         </div>
 
@@ -344,8 +298,8 @@
                   outline: none;
                   box-sizing: border-box;
                 "
-              />
-              <kbd
+               aria-describedby="library-search-shortcut" />
+              <kbd id="library-search-shortcut"
                 style="
                   position: absolute;
                   right: 0.75rem;
@@ -412,10 +366,11 @@
                 "
               />
             </div>
-            <div style="display: flex; gap: 0.3rem; flex-wrap: wrap">
+            <div style="display: flex; gap: 0.3rem; flex-wrap: wrap" role="group" aria-label="Search method">
               <button
                 id="btn-search-filter"
                 class="view-btn active"
+                aria-pressed="true"
                 style="
                   flex: 1;
                   justify-content: center;
@@ -428,6 +383,7 @@
               <button
                 id="btn-search-semantic"
                 class="view-btn"
+                aria-pressed="false"
                 style="
                   flex: 1;
                   justify-content: center;
@@ -440,6 +396,7 @@
               <button
                 id="btn-search-freq"
                 class="view-btn"
+                aria-pressed="false"
                 style="
                   flex: 1;
                   justify-content: center;
@@ -499,212 +456,6 @@
           </div>
         </div>
 
-        <div
-          id="chat-container"
-          class="panel-content"
-          style="display: none"
-          role="tabpanel"
-          aria-labelledby="tab-chat"
-        >
-          <div
-            id="chat-controls"
-            style="
-              padding: 10px;
-              border-bottom: 1px solid var(--glass-border);
-              text-align: center;
-            "
-          >
-            <button
-              id="btn-activate-ai"
-              class="view-btn"
-              style="
-                width: 100%;
-                justify-content: center;
-                background: var(--accent-color);
-                color: white;
-              "
-            >
-              Activate AI Chat
-            </button>
-            <div
-              id="ai-status"
-              role="status"
-              aria-live="polite"
-              class="text-secondary"
-              style="font-size: 0.8rem; margin-top: 5px"
-            >
-              Status: Offline
-            </div>
-          </div>
-          <div id="chat-messages">
-            <div class="chat-message assistant-msg">
-              Hi! Highlight some text and I can synthesize an answer based on
-              your library.
-            </div>
-          </div>
-          <div
-            class="chat-input-wrapper"
-            style="
-              flex-direction: column;
-              align-items: stretch;
-              padding: 0.5rem;
-              gap: 0;
-            "
-          >
-            <div
-              style="
-                display: flex;
-                width: 100%;
-                gap: 0.5rem;
-                align-items: center;
-              "
-            >
-              <textarea
-                id="chat-input"
-                aria-label="Chat input"
-                aria-describedby="chat-input-hint"
-                placeholder="Ask about the retrieved papers..."
-                style="flex: 1; resize: none; min-height: 40px"
-              ></textarea>
-              <button
-                id="btn-send-chat"
-                aria-label="Send"
-                title="Type a message to send"
-                disabled
-              >
-                ↑
-              </button>
-            </div>
-            <div
-              id="chat-input-hint"
-              style="
-                font-size: 0.7rem;
-                color: var(--text-secondary);
-                text-align: right;
-                margin-top: 4px;
-                pointer-events: none;
-                padding-right: 42px;
-              "
-            >
-              <kbd
-                style="
-                  font-family: var(--font-mono);
-                  background: transparent;
-                  border: 1px solid var(--glass-border);
-                  border-radius: 0.25rem;
-                  padding: 0.1rem 0.3rem;
-                "
-                >Enter</kbd
-              >
-              to send,
-              <kbd
-                style="
-                  font-family: var(--font-mono);
-                  background: transparent;
-                  border: 1px solid var(--glass-border);
-                  border-radius: 0.25rem;
-                  padding: 0.1rem 0.3rem;
-                "
-                >Shift + Enter</kbd
-              >
-              for new line
-            </div>
-          </div>
-        </div>
-        <div
-          id="potd-container"
-          class="panel-content"
-          style="display: none"
-          role="tabpanel"
-          aria-labelledby="tab-potd"
-        >
-          <div
-            class="text-secondary"
-            style="
-              font-size: 0.9rem;
-              text-align: center;
-              margin-top: 1rem;
-              margin-bottom: 1rem;
-            "
-          >
-            Top papers citing your library that you haven't read yet.
-          </div>
-          <div
-            style="
-              display: flex;
-              gap: 0.3rem;
-              flex-wrap: wrap;
-              margin-bottom: 1rem;
-            "
-          >
-            <button
-              id="btn-refresh-potd"
-              class="view-btn"
-              onclick="loadPOTD()"
-              style="
-                width: 100%;
-                background: var(--accent-color);
-                color: white;
-                justify-content: center;
-              "
-            >
-              Refresh POTD
-            </button>
-          </div>
-          <div
-            id="potd-list"
-            style="overflow-y: auto; flex: 1; padding-right: 0.5rem"
-          >
-            <!-- POTD results will go here -->
-          </div>
-        </div>
-
-        <div
-          id="seminal-container"
-          class="panel-content"
-          style="display: none"
-          role="tabpanel"
-          aria-labelledby="tab-seminal"
-        >
-          <div
-            class="text-secondary"
-            style="
-              font-size: 0.9rem;
-              text-align: center;
-              margin-top: 1rem;
-              margin-bottom: 1rem;
-            "
-          >
-            Foundational papers cited most frequently by your library.
-          </div>
-          <div
-            style="
-              display: flex;
-              gap: 0.3rem;
-              flex-wrap: wrap;
-              margin-bottom: 1rem;
-            "
-          >
-            <button
-              id="btn-refresh-seminal"
-              class="view-btn"
-              onclick="loadSeminal()"
-              style="
-                width: 100%;
-                background: var(--accent-color);
-                color: white;
-                justify-content: center;
-              "
-            >
-              Refresh Seminal
-            </button>
-          </div>
-          <div
-            id="seminal-list"
-            style="overflow-y: auto; flex: 1; padding-right: 0.5rem"
-          >
-            <!-- Seminal results will go here -->
-          </div>
         </div>
       </aside>
     </div>
@@ -720,7 +471,7 @@
         >
           &times;
         </button>
-        <iframe id="pdf-frame" src=""></iframe>
+        <iframe id="pdf-frame" src="" title="PDF Document Viewer"></iframe>
       </div>
     </div>
 
@@ -777,6 +528,7 @@
           id="graph-frame"
           src=""
           style="width: 100%; height: 100%; border: none; border-radius: 8px"
+          title="Knowledge Graph Explorer"
         ></iframe>
       </div>
     </div>

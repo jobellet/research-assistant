@@ -2,6 +2,7 @@ import json
 import logging
 from pathlib import Path
 import numpy as np
+from config import LIBRARY_DIR
 
 logger = logging.getLogger("neighbor_graph")
 
@@ -10,7 +11,7 @@ def build_neighbor_graph_bow(hash_id, bow_searcher, db_manager, top_n=50):
     Build a local graph of papers similar to the target hash_id based on Bag of Words.
     """
     # 1. Get the source paper's BOW
-    source_bow_path = Path(f"library/{hash_id}/bow.json")
+    source_bow_path = LIBRARY_DIR / hash_id / "bow.json"
     if not source_bow_path.exists():
         logger.error(f"BOW file not found for source: {hash_id}")
         return {"nodes": [], "edges": []}
@@ -43,12 +44,11 @@ def build_neighbor_graph_bow(hash_id, bow_searcher, db_manager, top_n=50):
             "title": meta.get("title", "Unknown"),
             "authors": meta.get("authors", ""),
             "year": meta.get("year", ""),
-            "pdf_filename": meta.get("pdf_filename", ""),
             "is_source": (h == hash_id)
         })
         
         # Load BOW for pairwise comparison
-        b_path = Path(f"library/{h}/bow.json")
+        b_path = LIBRARY_DIR / h / "bow.json"
         if b_path.exists():
             with open(b_path, "r") as f:
                 bow_vectors[h] = json.load(f)

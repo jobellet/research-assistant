@@ -24,10 +24,10 @@ python windows_worker.py --single-run
 
 :: 3. Commit and Push new metadata/embeddings
 echo 3. Syncing changes back to origin...
-git add library/**/metadata.json library/**/embedding.json papers_inventory.csv references.bib
+git add library/ papers_inventory.csv references.bib
 :: Only commit if there are changes
-git diff --cached --quiet
-if errorlevel 1 (
+git status --porcelain | findstr /R "." > nul
+if %errorlevel% equ 0 (
     echo    New data found. Committing...
     git commit -m "Auto-update: Metadata and embeddings from Windows Worker"
     git push

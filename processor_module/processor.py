@@ -12,6 +12,7 @@ try:
     from ingest_module.ingestor import process_file
     from extract_module.extractor import main as run_extraction
     from db_module.db_manager import DBManager
+    from config import LIBRARY_DIR, EXTERNAL_LIBRARY_PATH
 except ImportError:
     # Handle direct execution or testing scenarios
     import sys
@@ -19,13 +20,14 @@ except ImportError:
     from ingest_module.ingestor import process_file
     from extract_module.extractor import main as run_extraction
     from db_module.db_manager import DBManager
+    from config import LIBRARY_DIR, EXTERNAL_LIBRARY_PATH
 
 logger = logging.getLogger(__name__)
 
 class ManuscriptProcessor:
-    def __init__(self, library_dir="library", inbox_dir="inbox", interval=5):
-        self.library_dir = Path(library_dir)
-        self.inbox_dir = Path(inbox_dir)
+    def __init__(self, library_dir=None, inbox_dir=None, interval=5):
+        self.library_dir = Path(library_dir) if library_dir else LIBRARY_DIR
+        self.inbox_dir = Path(inbox_dir) if inbox_dir else EXTERNAL_LIBRARY_PATH
         self.interval = interval
         self.running = False
         self.thread = None

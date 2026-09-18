@@ -495,9 +495,6 @@ class ResearchAssistantGUI:
 
     def populate_tree(self):
         """Fills the results tree with the current search results."""
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-
         for i, res in enumerate(self.search_results):
             meta = res["metadata"]
             title = meta.get("title") or meta.get("pdf_filename") or "Unknown Title"

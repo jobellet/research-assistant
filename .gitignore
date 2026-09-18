@@ -14,13 +14,21 @@ chroma_db/
 tmp_bench_library/
 tmp_bench_inbox/
 
-# Research PDF Data (Ignore actual PDFs, keep structure)
+# Large generated files
+library_portal.html
+
+# Research PDF & Library Data (Completely ignored for privacy)
 inbox/*
 !inbox/.gitkeep
-library/**/*.pdf
-library/graph_cache.json
-library/citation_graph.json
-library/global_bow_index.json
+library/*
+!library/.gitkeep
+.file_registry.json
+.processed_hashes.json
+papers_inventory.csv
+
+# Private projects (keep only default project template)
+projects/*
+!projects/default/
 
 # OS Specific
 .DS_Store

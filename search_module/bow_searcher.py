@@ -1,12 +1,13 @@
 import json
 import logging
 from pathlib import Path
+from config import BOW_INDEX_PATH
 
 logger = logging.getLogger("bow_searcher")
 
 class BowSearcher:
-    def __init__(self, index_path="library/global_bow_index.json"):
-        self.index_path = Path(index_path)
+    def __init__(self, index_path=None):
+        self.index_path = Path(index_path) if index_path else BOW_INDEX_PATH
         self.index = {}
         self.load_index()
 

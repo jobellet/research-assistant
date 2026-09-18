@@ -121,7 +121,7 @@ function shortenTitle(t, max = 50) {
 
 function getNodeLabel(data) {
   if (!data) return "";
-  let author = "";
+  let author = "Unknown";
   if (data.authors && data.authors.trim()) {
     let raw = data.authors;
     if (Array.isArray(raw)) raw = raw[0];
@@ -142,22 +142,13 @@ function getNodeLabel(data) {
     }
   }
 
-  const year = data.year || data.pdf_filename?.match(/\d{4}/)?.[0] || "";
-
-  // If we have author and year, use classic citation format
-  if (author && year) return `(${author}, ${year})`;
-  // If we have author only
-  if (author) return `(${author})`;
-  // Fallback: use truncated title
-  if (data.title && data.title !== "Unknown") {
-    return shortenTitle(data.title, 30);
-  }
-  return "(Unknown)";
+  const year = data.year || data.pdf_filename?.match(/\d{4}/)?.[0] || "n.d.";
+  return `(${author}, ${year})`;
 }
 
 function sliderToThreshold(v) {
-  // Map 0-100 → 0.0 - 0.95
-  return (v / 100) * 0.95;
+  // Map 0-100 → 0.3 - 0.95
+  return 0.3 + (v / 100) * 0.65;
 }
 
 // ─── Bootstrap ─────────────────────────────────────────────────────────────
@@ -169,14 +160,6 @@ window.addEventListener("DOMContentLoaded", () => {
   const params = new URLSearchParams(window.location.search);
   const neighborId = params.get("neighbor_id");
   if (neighborId) {
-    // Lower threshold for neighbor graphs (BoW similarity is typically 0.05-0.3)
-    thresholdRaw = 0;
-    if (thresholdSlider) {
-      thresholdSlider.value = 0;
-    }
-    if (thresholdVal) {
-      thresholdVal.textContent = "0.0";
-    }
     loadNeighborGraph(neighborId);
   } else {
     loadGraph();
@@ -185,41 +168,25 @@ window.addEventListener("DOMContentLoaded", () => {
 });
 
 async function loadNeighborGraph(neighborId) {
-  console.log("[QuickGraph] loadNeighborGraph called with:", neighborId);
   showLoading("Building neighbor graph…");
   setStatus("Loading neighbors…", "building");
-
   try {
-    console.log("[QuickGraph] Fetching /api/graph/neighbors/" + neighborId);
     const data = await apiFetch(`/api/graph/neighbors/${neighborId}`);
-    console.log("[QuickGraph] API response:", { nodes: data.nodes?.length, edges: data.edges?.length, source_id: data.source_id });
     if (!data.nodes || data.nodes.length === 0) {
-      setStatus("No neighbors found — this paper may not have a BoW index.", "error");
+      setStatus("No neighbors found.", "error");
       hideLoading();
       return;
     }
 
-    const sourceNode = data.nodes.find((n) => n.is_source || n.id === neighborId);
-    const otherNodes = data.nodes.filter((n) => n !== sourceNode);
-
-    if (sourceNode) {
-      sourceNode.x = 0;
-      sourceNode.y = 0;
-      sourceNode.cluster = 1;
-      sourceNode.cluster_color = "#f59e0b";
-      sourceNode.degree = otherNodes.length;
-      sourceNode.hash_id = sourceNode.id;
-    }
-
-    const radius = 0.8;
-    otherNodes.forEach((n, i) => {
-      const angle = (2 * Math.PI * i) / Math.max(1, otherNodes.length);
-      n.x = radius * Math.cos(angle) + (Math.random() * 0.1 - 0.05);
-      n.y = radius * Math.sin(angle) + (Math.random() * 0.1 - 0.05);
-      n.cluster = 0;
-      n.cluster_color = "#6366f1";
-      n.degree = 1;
-      n.hash_id = n.id;
+    // Since these don't have X,Y coordinates from the server, we randomize them
+    // and we'll use a force layout if available or just Sigma's random
+    data.nodes.forEach((n, i) => {
+      n.x = Math.random() * 2 - 1;
+      n.y = Math.random() * 2 - 1;
+      // Assign dummy cluster colors for neighbors if not present
+      n.cluster = n.is_source ? 1 : 0;
+      n.cluster_color = n.is_source ? "#ffffff" : "#6366f1";
+      n.degree = 1; // dummy
     });
 
     // Minimal stats for UI
@@ -231,96 +198,41 @@ async function loadNeighborGraph(neighborId) {
 
     graphData = data;
 
-    // Slight delay to ensure DOM and layout container dimensions are fully ready
+    // Slight delay to ensure DOM and layout are ready
     requestAnimationFrame(() => {
       renderGraph();
 
-      // Custom force-directed spring layout in normalized coordinate space
-      if (graph) {
-        const nodes = graph.nodes();
-        const velocities = {};
-        nodes.forEach((node) => (velocities[node] = { x: 0, y: 0 }));
-
-        const cRep = 0.0005;
-        const cAtt = 0.08;
-        const gravity = 0.02;
-        const damping = 0.7;
-
-        for (let iter = 0; iter < 100; iter++) {
-          for (let i = 0; i < nodes.length; i++) {
-            const n1 = nodes[i];
-            const pos1 = { x: graph.getNodeAttribute(n1, "x"), y: graph.getNodeAttribute(n1, "y") };
-            for (let j = i + 1; j < nodes.length; j++) {
-              const n2 = nodes[j];
-              const pos2 = { x: graph.getNodeAttribute(n2, "x"), y: graph.getNodeAttribute(n2, "y") };
-              const dx = pos1.x - pos2.x;
-              const dy = pos1.y - pos2.y;
-              const distSq = dx * dx + dy * dy + 1e-4;
-              const dist = Math.sqrt(distSq);
-              const force = cRep / distSq;
-              const fx = (dx / dist) * force;
-              const fy = (dy / dist) * force;
-              if (n1 !== neighborId) {
-                velocities[n1].x += fx;
-                velocities[n1].y += fy;
-              }
-              if (n2 !== neighborId) {
-                velocities[n2].x -= fx;
-                velocities[n2].y -= fy;
-              }
-            }
-          }
-
-          graph.forEachEdge((edge, attributes, source, target) => {
-            const posS = { x: graph.getNodeAttribute(source, "x"), y: graph.getNodeAttribute(source, "y") };
-            const posT = { x: graph.getNodeAttribute(target, "x"), y: graph.getNodeAttribute(target, "y") };
-            const dx = posS.x - posT.x;
-            const dy = posS.y - posT.y;
-            const dist = Math.sqrt(dx * dx + dy * dy) + 1e-4;
-            const weight = attributes.weight || 0.5;
-            const force = cAtt * dist * weight;
-            const fx = (dx / dist) * force;
-            const fy = (dy / dist) * force;
-            if (source !== neighborId) {
-              velocities[source].x -= fx;
-              velocities[source].y -= fy;
-            }
-            if (target !== neighborId) {
-              velocities[target].x += fx;
-              velocities[target].y += fy;
-            }
-          });
-
-          nodes.forEach((node) => {
-            if (node === neighborId) return;
-            const px = graph.getNodeAttribute(node, "x");
-            const py = graph.getNodeAttribute(node, "y");
-            velocities[node].x -= px * gravity;
-            velocities[node].y -= py * gravity;
-            const nx = px + velocities[node].x;
-            const ny = py + velocities[node].y;
-            velocities[node].x *= damping;
-            velocities[node].y *= damping;
-            graph.setNodeAttribute(node, "x", nx);
-            graph.setNodeAttribute(node, "y", ny);
-          });
-        }
+      // Run ForceAtlas2 for a few seconds to settle the layout
+      if (window.forceAtlas2) {
+        window.forceAtlas2.assign(graph, {
+          iterations: 100,
+          settings: {
+            gravity: 0.1,
+            scalingRatio: 10,
+            barnesHutOptimize: true,
+          },
+        });
+      } else if (window.graphology && window.graphology.layout) {
+        window.graphology.layout.circular.assign(graph);
       }
 
-      if (renderer) renderer.refresh();
       updateStats();
-      const focalTitle = sourceNode ? shortenTitle(sourceNode.title, 35) : neighborId.substring(0, 8);
-      setStatus(`Neighborhood Graph: ${focalTitle} (${data.nodes.length} papers)`, "ready");
+      setStatus(
+        `Focused on ${neighborId} — ${data.nodes.length} neighbors`,
+        "ready",
+      );
       hideLoading();
 
-      // Reset camera view onto radial origin
+      // Zoom into source
       setTimeout(() => {
         if (renderer) {
           try {
-            renderer.getCamera().animate({ x: 0, y: 0, ratio: 1.0 }, { duration: 600 });
+            renderer
+              .getCamera()
+              .animate({ x: 0, y: 0, ratio: 0.8 }, { duration: 1000 });
           } catch (e) {}
         }
-      }, 200);
+      }, 500);
     });
   } catch (err) {
     setStatus("Error loading neighbors", "error");
@@ -375,9 +287,7 @@ function sleep(ms) {
 // ─── Render Graph with Sigma.js ────────────────────────────────────────────
 function renderGraph() {
   const container = document.getElementById("sigma-canvas");
-  if (!container) { console.error("[renderGraph] #sigma-canvas not found!"); return; }
-
-  console.log("[renderGraph] container dims:", container.offsetWidth, "x", container.offsetHeight);
+  if (!container) return;
 
   // Basic sanity check: WebGL often fails if container has no size
   if (container.offsetWidth === 0 || container.offsetHeight === 0) {
@@ -395,7 +305,6 @@ function renderGraph() {
   }
 
   if (typeof Sigma === "undefined" || typeof graphology === "undefined") {
-    console.error("[renderGraph] Sigma or graphology not loaded!");
     setStatus("Graph library not loaded (CDN error)", "error");
     return;
   }
@@ -403,7 +312,6 @@ function renderGraph() {
   graph = new graphology.Graph({ multi: false, type: "undirected" });
 
   const threshold = sliderToThreshold(thresholdRaw);
-  console.log("[renderGraph] thresholdRaw:", thresholdRaw, "→ threshold:", threshold);
   const nodeMap = {};
 
   // Add nodes
@@ -423,7 +331,6 @@ function renderGraph() {
   }
 
   // Add semantic edges
-  let edgesAdded = 0;
   for (const e of graphData.edges) {
     if (e.weight < threshold) continue;
     if (!graph.hasNode(e.source) || !graph.hasNode(e.target)) continue;
@@ -434,10 +341,8 @@ function renderGraph() {
         size: Math.max(0.3, e.weight * 1.5),
         color: `rgba(99,102,241,${Math.min(e.weight * 0.5, 0.4)})`,
       });
-      edgesAdded++;
     } catch {}
   }
-  console.log("[renderGraph] Graph built:", graph.order, "nodes,", edgesAdded, "edges added (threshold:", threshold.toFixed(3), ")");
 
   // Add citation edges (if loaded and toggled)
   if (showCitations && citationData) {
@@ -457,7 +362,7 @@ function renderGraph() {
   if (graphData.source_id && graph.hasNode(graphData.source_id)) {
     graph.setNodeAttribute(graphData.source_id, "size", 15);
     graph.setNodeAttribute(graphData.source_id, "color", "#f59e0b");
-    const currentLabel = graph.getNodeAttribute(graphData.source_id, "label") || "";
+    const currentLabel = graph.getNodeAttribute(graphData.source_id, "label");
     if (!currentLabel.startsWith("🌟")) {
       graph.setNodeAttribute(
         graphData.source_id,

@@ -75,8 +75,9 @@ def run_batch_indexing(batch_size=100):
                 for j, (hash_id, metadata, text_content) in enumerate(docs):
                     emb_path = LIBRARY_DIR / hash_id / "embedding.json"
                     try:
+                        emb_data = embeddings[j].tolist() if hasattr(embeddings[j], "tolist") else embeddings[j]
                         with open(emb_path, "w") as f:
-                            json.dump(embeddings[j], f)
+                            json.dump(emb_data, f)
                         logger.debug(f"Saved embedding for {hash_id}")
                     except Exception as e:
                         logger.error(f"Failed to save embedding for {hash_id}: {e}")

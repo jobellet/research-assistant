@@ -4,6 +4,11 @@ import logging
 from pathlib import Path
 from collections import Counter
 import re
+import sys
+
+# Ensure repo root is on sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from config import LIBRARY_DIR, BOW_INDEX_PATH
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("generate_bow")
@@ -46,10 +51,10 @@ def process_text(text):
             
     return processed
 
-def main(library_dir="library"):
-    lib_path = Path(library_dir)
+def main(library_dir=None):
+    lib_path = Path(library_dir) if library_dir else LIBRARY_DIR
     if not lib_path.exists():
-        logger.error(f"Library directory not found: {library_dir}")
+        logger.error(f"Library directory not found: {lib_path}")
         return
 
     global_index = {}
@@ -103,8 +108,9 @@ def main(library_dir="library"):
         pruned_index[word] = entries[:100]
 
     # 3. Save optimized global inverted index
-    index_path = lib_path / "global_bow_index.json"
+    index_path = BOW_INDEX_PATH if not library_dir else lib_path / "global_bow_index.json"
     try:
+        index_path.parent.mkdir(parents=True, exist_ok=True)
         # Using separators for more compact JSON (no spaces)
         with open(index_path, "w") as f:
             json.dump(pruned_index, f, separators=(',', ':'))

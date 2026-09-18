@@ -34,7 +34,7 @@ def test_queries():
     from unittest import mock
     import sys
     mock_st = mock.MagicMock()
-    mock_st.encode.return_value = [[0.1]*256]
+    import numpy as np; mock_st.encode.return_value = np.array([[0.1]*256])
     with mock.patch.dict(sys.modules, {"sentence_transformers": mock.MagicMock(SentenceTransformer=mock.MagicMock(return_value=mock_st))}):
         # Explicitly patch SentenceTransformer everywhere it is imported inside db_manager
         with mock.patch('db_module.db_manager.SentenceTransformer', return_value=mock_st):
@@ -66,7 +66,7 @@ def test_path_traversal():
     from unittest import mock
     import sys
     mock_st = mock.MagicMock()
-    mock_st.encode.return_value = [[0.1]*256]
+    import numpy as np; mock_st.encode.return_value = np.array([[0.1]*256])
     with mock.patch.dict(sys.modules, {"sentence_transformers": mock.MagicMock(SentenceTransformer=mock.MagicMock(return_value=mock_st))}):
         with mock.patch('db_module.db_manager.SentenceTransformer', return_value=mock_st):
             from search_module.searcher import SemanticSearcher
@@ -91,7 +91,7 @@ def test_search_batch():
 
     # Mock SentenceTransformer
     mock_st = mock.MagicMock()
-    mock_st.encode.return_value = [[0.1]*256]
+    import numpy as np; mock_st.encode.return_value = np.array([[0.1]*256])
     with mock.patch.dict(sys.modules, {"sentence_transformers": mock.MagicMock(SentenceTransformer=mock.MagicMock(return_value=mock_st))}):
         with mock.patch('db_module.db_manager.SentenceTransformer', return_value=mock_st):
             from search_module.searcher import SemanticSearcher
