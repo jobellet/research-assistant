@@ -50,8 +50,8 @@ if [ -n "$PUBLIC_URL" ]; then
 **Last Started:** $(date '+%Y-%m-%d %H:%M:%S')
 
 - **Public URL:** $PUBLIC_URL
-- **Access Password:** \`vibe-coding-secret\`
-- **Direct Login Link:** [$PUBLIC_URL/ui?token=vibe-coding-secret]($PUBLIC_URL/ui?token=vibe-coding-secret)
+- **Access Password:** the value of \`SERVER_PASSWORD\` in your \`.env\`
+- **Direct Login Link:** $PUBLIC_URL/ui (enter your password when prompted; do not put it in the URL)
 
 ### 📎 Multi-File Support Enabled
 The system is configured to group supplements and main papers by DOI. You can choose which file to open directly from the search result card.

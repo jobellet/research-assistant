@@ -1,11 +1,15 @@
 import os
+import secrets
 from fastapi import Header, Query, HTTPException, status
 from typing import Optional
 
 # Default security: a simple password check
-SERVER_PASSWORD = os.getenv("SERVER_PASSWORD", "vibe-coding-secret")
-if os.getenv("API_KEY"): # Support alternative env name
-    SERVER_PASSWORD = os.getenv("API_KEY")
+# Password comes from SERVER_PASSWORD (or API_KEY / AUTH_TOKEN). If none is set, a random
+# per-process token is generated and printed so there is never a publicly known default.
+SERVER_PASSWORD = os.getenv("SERVER_PASSWORD") or os.getenv("API_KEY") or os.getenv("AUTH_TOKEN")
+if not SERVER_PASSWORD:
+    SERVER_PASSWORD = secrets.token_urlsafe(16)
+    print(f"[auth] SERVER_PASSWORD not set; generated one-time token for this run: {SERVER_PASSWORD}")
 
 def verify_auth_token(x_auth_token: Optional[str] = Header(None), token: Optional[str] = Query(None)):
     """

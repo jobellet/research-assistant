@@ -114,4 +114,4 @@ For a detailed step-by-step walkthrough covering distributed processing, knowled
 
 ## 📄 License & Contributing
 
-No LICENSE file is currently included in the repository, despite the MIT badge above; add one before relying on it. Contributions, bug reports, and feature requests are welcome!
+Open-source under the [MIT License](LICENSE). Contributions, bug reports, and feature requests are welcome!

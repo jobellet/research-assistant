@@ -32,7 +32,7 @@ else:
     EXTERNAL_LIBRARY_PATH = DATA_DIR / "inbox"
 
 # Authentication
-AUTH_TOKEN = os.environ.get("AUTH_TOKEN", "vibe-coding-secret")
+AUTH_TOKEN = os.environ.get("AUTH_TOKEN", "")
 
 # --- All data paths derive from DATA_DIR ---
 LIBRARY_DIR = DATA_DIR / "library"

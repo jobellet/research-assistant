@@ -149,7 +149,7 @@ Navigate to `http://localhost:8000/ui/` to open the research writing environment
 | **"Saved" indicator** | Auto-saves to browser local storage as you type |
 | **"Editor / Knowledge Graph" tabs** | Switch between writing mode and the citation graph view |
 | **Right panel — Semantic Matches** | Shows papers from your library that match the highlighted text |
-| **Login button** | Enter your `x-auth-token` (default: `vibe-coding-secret`) to enable API calls |
+| **Login button** | Enter your `x-auth-token` (your `SERVER_PASSWORD`; if unset, a random token is printed at server startup) to enable API calls |
 
 ---
 

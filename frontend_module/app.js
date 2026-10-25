@@ -1,8 +1,6 @@
 const CONFIG = {
   API_BASE: window.location.origin,
-  AUTH_TOKEN:
-    new URLSearchParams(window.location.search).get("token") ||
-    "vibe-coding-secret",
+  AUTH_TOKEN: new URLSearchParams(window.location.search).get("token") || "",
 };
 
 // Store token in session storage for persistence if provided in URL
@@ -10,6 +8,12 @@ if (new URLSearchParams(window.location.search).get("token")) {
   sessionStorage.setItem("auth_token", CONFIG.AUTH_TOKEN);
 } else if (sessionStorage.getItem("auth_token")) {
   CONFIG.AUTH_TOKEN = sessionStorage.getItem("auth_token");
+}
+
+if (!CONFIG.AUTH_TOKEN) {
+  // No token in URL or session: ask once (the server prints/uses SERVER_PASSWORD)
+  CONFIG.AUTH_TOKEN = window.prompt("Enter your SERVER_PASSWORD:") || "";
+  if (CONFIG.AUTH_TOKEN) sessionStorage.setItem("auth_token", CONFIG.AUTH_TOKEN);
 }
 
 const state = {
