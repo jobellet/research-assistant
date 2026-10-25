@@ -60,9 +60,7 @@ python -m uvicorn server_module.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 On startup the server will automatically:
-- **Sync the Git repository** via `git pull --rebase` to grab any changes from other computers.
 - **Acquire a lock file** (`server.lock`) to prevent two instances from running simultaneously on the same machine.
-- **Start a public ngrok tunnel** (optional — set `ENABLE_TUNNEL=false` to disable).
 
 The two main interfaces are then available:
 | URL | Purpose |

@@ -1,6 +1,6 @@
 # 🔬 Research Assistant
 
-> A self-hosted, privacy-focused AI research workstation combining **Zotero** (PDF library management & metadata extraction), **Connected Papers** (semantic knowledge graphs & citation networks), and **Overleaf** (browser-based LaTeX manuscript editor with live semantic search).
+> A self-hosted, privacy-focused AI research workstation combining **Zotero** (PDF library management & metadata extraction), **Connected Papers** (semantic knowledge graphs & citation networks), and a simple browser-based LaTeX draft editor with live semantic citation search (not an Overleaf replacement: no compilation, PDF preview or collaboration).
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)](https://fastapi.tiangolo.com/)
@@ -40,10 +40,10 @@ Choose whichever method best fits your existing workflow:
   *Auto-detects `~/Zotero/storage`, calculates SHA-256 hashes for zero-duplicate ingestion, fetches metadata from Crossref, and builds the ChromaDB index.*
 
 - 📂 **Local Inbox Folder**:
-  Drop any scientific PDF directly into `inbox/`. The system hashes the file, moves it to `library/<hash>/`, extracts text, and indexes it automatically.
+  Drop any scientific PDF into `inbox/`, then run the pipeline (`POST /api/processor/run`, or `ingest_module/monitor.py` to watch the folder). It hashes the file, moves it to `library/<hash>/`, extracts text, and indexes it. The server does not watch `inbox/` on its own.
 
 - ☁️ **Google Drive**:
-  Run `python scripts/gdrive_sync.py` to mirror remote PDF folders.
+  Run `python scripts/gdrive_sync.py <folder_id>` (or set `GDRIVE_FOLDER_ID`) to mirror a publicly shared Drive folder into `inbox/`.
 
 ---
 
@@ -63,8 +63,8 @@ Open your browser and navigate to:
 
 ## ✨ Core Features
 
-- ✍️ **Web-Based LaTeX Manuscript Editor**: Write your papers directly in the browser with auto-save and multi-project organization (`projects/<name>/draft.tex`).
-- 🔍 **Highlight-to-Search**: Select any sentence, hypothesis, or paragraph in your LaTeX draft to instantly surface relevant papers from your local library in real-time.
+- ✍️ **Web-Based LaTeX Draft Editor**: A plain-text editor in the browser that saves per project to `projects/<name>/draft.tex`. It does not compile LaTeX or preview PDFs.
+- 🔍 **Highlight-to-Search**: Select any sentence, hypothesis, or paragraph in your LaTeX draft to search your local library with semantic vector search or Bag-of-Words keyword matching (selected per query, not combined).
 - 📌 **1-Click BibTeX Injection**: Click **"Add Reference"** on any search result to automatically format and append a clean BibTeX entry to `references.bib`.
 - 🕸️ **Interactive Semantic Knowledge Graph**: Explore literature clusters in 2D using UMAP embeddings and visualize citation connections powered by Semantic Scholar.
 - 📎 **Supplementary & Multi-File PDF Grouping**: Automatically clusters main papers and supplementary materials by DOI so you can view all associated files from a single card.
@@ -114,4 +114,4 @@ For a detailed step-by-step walkthrough covering distributed processing, knowled
 
 ## 📄 License & Contributing
 
-Open-source under the [MIT License](LICENSE). Contributions, bug reports, and feature requests are welcome!
+No LICENSE file is currently included in the repository, despite the MIT badge above; add one before relying on it. Contributions, bug reports, and feature requests are welcome!

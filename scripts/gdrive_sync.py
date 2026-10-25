@@ -52,11 +52,13 @@ def sync_gdrive(folder_id, dest_path):
         logger.error(f"An error occurred during sync: {e}")
 
 if __name__ == "__main__":
-    # The folder ID provided by the user
-    FOLDER_ID = "12xY78VsoT7ghfPZfJ8L1591FzUuSdEtv"
-    
+    # Folder ID comes from argv[1] or the GDRIVE_FOLDER_ID env var
+    FOLDER_ID = sys.argv[1] if len(sys.argv) > 1 else os.getenv("GDRIVE_FOLDER_ID")
+    if not FOLDER_ID:
+        sys.exit("Usage: python scripts/gdrive_sync.py <folder_id>  (or set GDRIVE_FOLDER_ID)")
+
     # Destination is the 'inbox' folder in the project root
     PROJECT_ROOT = Path(__file__).parent.parent
     DEST_DIR = PROJECT_ROOT / "inbox"
-    
+
     sync_gdrive(FOLDER_ID, DEST_DIR)

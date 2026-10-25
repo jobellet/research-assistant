@@ -7,14 +7,14 @@
 
 ## 1. High-Level Description & Repository Purpose
 
-**My AI Research Assistant** is a self-hosted, AI-powered research workstation combining features of **Zotero** (pdf management & metadata extraction), **Connected Papers** (semantic paper visualization & citation graphs), and **Overleaf** (web-based LaTeX manuscript drafting).
+**My AI Research Assistant** is a self-hosted, AI-powered research workstation combining features of **Zotero** (pdf management & metadata extraction), **Connected Papers** (semantic paper visualization & citation graphs), and a simple web-based LaTeX draft editor (no compilation or collaboration; not an Overleaf replacement).
 
 ### Core Workflow Pipeline
 1. **Ingestion (`ingest_module/`)**: Monitors `inbox/` for scientific PDFs. Computes SHA-256 binary hashes to create unique `library/<hash>/` folders and avoids duplicate processing.
 2. **Content Extraction (`extract_module/`)**: Reads PDFs (`PyMuPDF`), cleans raw text (`scripts/clean_manuscript.py`), and resolves metadata (Title, Authors, Year, DOI, Summary, References) using fast Crossref API lookups with fallback to local/remote LLMs (Ollama / SLURM cluster GPU workers).
 3. **Vector Database & Search (`db_module/`, `search_module/`)**: Uses **`google/embeddinggemma-300m`** with Matryoshka Representation Learning (MRL) truncated to 256 dimensions in `ChromaDB` for semantic search. Also builds a Bag-of-Words (BoW) inverted index (`scripts/generate_bow.py`) for instant keyword queries.
 4. **Graph & Citation Management (`graph_module/`, `citation_module/`)**: Computes 2D UMAP embeddings and HDBSCAN/KMeans clusters for 2D/3D graph visualization, fetches citation networks via Semantic Scholar API, and injects BibTeX citations into LaTeX `.bib` files.
-5. **Server & Web Interface (`server_module/`, `frontend_module/`)**: FastAPI server hosting REST API endpoints and web UI (LaTeX editor with live semantic search, PDF viewer, citation graph, library stats). Supports tunneling (`ngrok`, `localhost.run`) and single-instance mutex locks (`server.lock`).
+5. **Server & Web Interface (`server_module/`, `frontend_module/`)**: FastAPI server hosting REST API endpoints and web UI (LaTeX editor with live semantic search, PDF viewer, citation graph, library stats). Optional `localhost.run` tunnel via `scripts/run_research_tunnel.sh` (the server itself starts no tunnel) and single-instance mutex locks (`server.lock`).
 
 ---
 
