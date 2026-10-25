@@ -1,6 +1,6 @@
 # 🔬 Research Assistant
 
-> A self-hosted, privacy-focused AI research workstation combining **Zotero** (PDF library management & metadata extraction), **Connected Papers** (semantic knowledge graphs & citation networks), and a simple browser-based LaTeX draft editor with live semantic citation search (not an Overleaf replacement: no compilation, PDF preview or collaboration).
+> A self-hosted, privacy-focused, AI-powered research workstation: PDF library management with Zotero import and Crossref metadata extraction, a semantic and citation graph of your papers (UMAP + Semantic Scholar), and a simple LaTeX draft editor with citation search (no compilation, PDF preview or collaboration). Not affiliated with Zotero, Connected Papers or Overleaf.
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)](https://fastapi.tiangolo.com/)

@@ -7,7 +7,7 @@
 
 ## 1. High-Level Description & Repository Purpose
 
-**My AI Research Assistant** is a self-hosted, AI-powered research workstation combining features of **Zotero** (pdf management & metadata extraction), **Connected Papers** (semantic paper visualization & citation graphs), and a simple web-based LaTeX draft editor (no compilation or collaboration; not an Overleaf replacement).
+**My AI Research Assistant** is a self-hosted, AI-powered research workstation: PDF library management with Zotero import and Crossref metadata extraction, a semantic and citation graph of papers (UMAP + Semantic Scholar), and a simple LaTeX draft editor with citation search (no compilation or collaboration). It is inspired by, and not affiliated with, Zotero, Connected Papers or Overleaf.
 
 ### Core Workflow Pipeline
 1. **Ingestion (`ingest_module/`)**: Monitors `inbox/` for scientific PDFs. Computes SHA-256 binary hashes to create unique `library/<hash>/` folders and avoids duplicate processing.
