@@ -110,11 +110,24 @@ def audit_numbers(text_or_paras: Union[str, List[str]], horizon: int = 36) -> Di
 
 
 if __name__ == "__main__":
-    sample_paras = [
-        "We plan 12 sessions in total across 4 animals.",
-        "Each animal undergoes 3 sessions per animal with 4 animals.",
-        "In month 12 to 24 we record 100 neurons, whereas later we record 150 neurons.",
-        "Project phases extend from month 1 to month 40."
-    ]
-    res = audit_numbers(sample_paras, horizon=36)
-    print(res)
+    import argparse
+    import json
+    import sys
+
+    parser = argparse.ArgumentParser(description="Check quantities, sums, ranges and timeline bounds in a text.")
+    parser.add_argument("files", nargs="*", help="text files to audit ('-' for stdin); none = built-in example")
+    parser.add_argument("--horizon", type=int, default=36, help="project duration in months (default 36)")
+    args = parser.parse_args()
+    if not args.files:
+        print("No file given: auditing a built-in example. Usage: python -m audit_module.number_auditor draft.txt",
+              file=sys.stderr)
+        inputs = {"example": [
+            "We plan 12 sessions in total across 4 animals.",
+            "Each animal undergoes 3 sessions per animal with 4 animals.",
+            "In month 12 to 24 we record 100 neurons, whereas later we record 150 neurons.",
+            "Project phases extend from month 1 to month 40.",
+        ]}
+    else:
+        inputs = {f: (sys.stdin.read() if f == "-" else open(f, encoding="utf-8").read()) for f in args.files}
+    for name, text in inputs.items():
+        print(json.dumps({"file": name, **audit_numbers(text, horizon=args.horizon)}, indent=2, ensure_ascii=False))

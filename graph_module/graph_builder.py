@@ -249,7 +249,7 @@ def build_semantic_graph(db_manager, k_neighbors: int = 10, force_rebuild: bool 
             "cluster": labels[i],
             "cluster_color": cluster_color.get(labels[i], "#888"),
             "degree": degree[paper_id],
-            "summary": (documents[i] or "")[:400] if documents else "",
+            "summary": _paper_summary(paper_id, documents[i] if documents else ""),
             "pdf_filename": meta.get("pdf_filename", ""),
         })
 
@@ -260,12 +260,14 @@ def build_semantic_graph(db_manager, k_neighbors: int = 10, force_rebuild: bool 
     for lbl in labels:
         cluster_counts[lbl] = cluster_counts.get(lbl, 0) + 1
 
+    cluster_names = _cluster_names(nodes, unique_labels)
     clusters = [
         {
             "id": lbl,
             "color": cluster_color.get(lbl, "#888"),
             "count": cluster_counts[lbl],
-            "label": f"Cluster {lbl}",
+            "label": cluster_names.get(lbl) or f"Cluster {lbl}",
+            "terms": (cluster_names.get(lbl) or "").split(" · ") if cluster_names.get(lbl) else [],
         }
         for lbl in unique_labels
     ]
@@ -297,6 +299,65 @@ def build_semantic_graph(db_manager, k_neighbors: int = 10, force_rebuild: bool 
     _save_cache(graph)
     logger.info(f"Graph built: {len(nodes)} nodes, {len(edges)} edges, {len(unique_labels)} clusters.")
     return graph
+
+
+def _paper_summary(paper_id: str, fallback: str = "") -> str:
+    """The abstract from metadata.json (ChromaDB documents hold the embedding text)."""
+    try:
+        from config import LIBRARY_DIR
+        meta = json.loads((LIBRARY_DIR / paper_id / "metadata.json").read_text())
+        if meta.get("summary"):
+            return meta["summary"][:600]
+    except Exception:
+        pass
+    return (fallback or "")[:400]
+
+
+def _cluster_names(nodes, unique_labels, n_terms: int = 3) -> dict:
+    """Name each cluster by the title/keyword words that are most specific to it."""
+    import re
+    from collections import Counter
+    try:
+        from search_module.bow_builder import STOPWORDS as STOP
+    except Exception:  # pragma: no cover
+        STOP = set()
+    STOP = set(STOP) | {"towards", "toward", "insights", "approach", "evidence", "case", "lessons",
+                        "perspective", "framework", "probing", "evaluating", "measuring", "role",
+                        "about", "their", "they", "large", "make", "know", "what", "does", "sense"}
+    docs = {lbl: Counter() for lbl in unique_labels}
+    sizes = Counter()
+    for n in nodes:
+        lbl = n["cluster"]
+        if lbl not in docs:
+            continue
+        sizes[lbl] += 1
+        text = f"{n.get('title', '')} {n.get('keywords', '')}".lower()
+        words = {w for w in re.findall(r"[a-z]{4,}", text) if w not in STOP}
+        docs[lbl].update(words)          # document frequency inside the cluster
+    names = {}
+    total = sum(sizes.values()) or 1
+    global_df = Counter()
+    for c in docs.values():
+        global_df.update(c)
+    # words present in most papers of the library (e.g. the field's name) say nothing about a cluster
+    n_clusters = max(len(unique_labels), 1)
+    spread = {w: sum(1 for c in docs.values() if c[w]) for w in global_df}
+    STOP |= {w for w, c in global_df.items() if c / total > 0.3 and spread[w] > n_clusters / 2}
+    for lbl in unique_labels:
+        size = sizes[lbl] or 1
+        others = total - size
+        scored = []
+        for w, c in docs[lbl].items():
+            if w in STOP:
+                continue
+            if c < 2 and size > 2:
+                continue
+            outside = sum(docs[o][w] for o in unique_labels if o != lbl)
+            score = c / size - (outside / others if others else 0)
+            scored.append((score, c, w))
+        scored.sort(reverse=True)
+        names[lbl] = " · ".join(w for _, _, w in scored[:n_terms])
+    return names
 
 
 def _detect_structural_holes(nodes, edges, unique_labels, emb_matrix, ids) -> list:
@@ -367,7 +428,9 @@ def _detect_structural_holes(nodes, edges, unique_labels, emb_matrix, ids) -> li
             avg_within_density = (within_density_1 + within_density_2) / 2
 
             # A structural hole: semantically similar clusters with sparse inter-connections
-            if inter_sim > 0.55 and inter_density < avg_within_density * 0.3:
+            # Thresholds are relative to the library's own link density so the
+            # detection also works for small, single-topic libraries.
+            if inter_sim > 0.5 and inter_density < avg_within_density * 0.6:
                 gaps.append({
                     "cluster_a": c1,
                     "cluster_b": c2,

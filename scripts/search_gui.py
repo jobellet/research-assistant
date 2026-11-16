@@ -495,6 +495,8 @@ class ResearchAssistantGUI:
 
     def populate_tree(self):
         """Fills the results tree with the current search results."""
+        # Clear previous results first (re-inserting iid "0" would raise TclError)
+        self.tree.delete(*self.tree.get_children())
         for i, res in enumerate(self.search_results):
             meta = res["metadata"]
             title = meta.get("title") or meta.get("pdf_filename") or "Unknown Title"

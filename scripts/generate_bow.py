@@ -1,125 +1,61 @@
-import os
-import json
-import logging
-from pathlib import Path
-from collections import Counter
-import re
-import sys
+"""Rebuild the word-frequency (BOW) index and TF-IDF keywords for the library.
 
-# Ensure repo root is on sys.path
+The server's background processor does this automatically after new papers are
+processed; run this script after importing papers by other means.
+
+    python scripts/generate_bow.py [--library PATH] [--no-keywords] [--update-db]
+"""
+import argparse
+import logging
+import os
+import sys
+from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from config import LIBRARY_DIR, BOW_INDEX_PATH
+from config import BOW_INDEX_PATH, LIBRARY_DIR  # noqa: E402
+from search_module.bow_builder import build_bow_index, process_text  # noqa: E402,F401
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("generate_bow")
 
-def process_text(text):
-    # Expanded list of common stopwords to exclude
-    STOPWORDS = {
-        'the', 'and', 'for', 'with', 'from', 'this', 'that', 'which', 'was', 'were',
-        'been', 'have', 'has', 'are', 'not', 'but', 'also', 'their', 'they', 'our',
-        'your', 'will', 'can', 'should', 'would', 'could', 'about', 'than', 'then',
-        'them', 'these', 'those', 'such', 'into', 'only', 'other', 'some', 'more',
-        'most', 'very', 'both', 'each', 'any', 'all', 'anywhere', 'another', 'while',
-        'where', 'when', 'who', 'how', 'why', 'what', 'after', 'before', 'during',
-        'between', 'under', 'over', 'through', 'above', 'below', 'once', 'here',
-        'there', 'mean', 'means', 'using', 'used', 'use', 'using', 'study', 'research',
-        'results', 'analysis', 'data', 'methods', 'method', 'paper', 'article',
-        'system', 'based', 'approach', 'model', 'provide', 'shown', 'Figure', 'Table'
-    }
-    
-    # Extract words (3 or more chars), lowercase
-    words = re.findall(r'\b[a-z]{3,}\b', text.lower())
-    if not words:
-        return {}
-    
-    # Filter stopwords
-    filtered_words = [w for w in words if w not in STOPWORDS]
-    if not filtered_words:
-        return {}
-        
-    total_words = len(words)
-    counts = Counter(filtered_words)
-    
-    # Only keep words that have at least 0.05% frequency or appear at least twice
-    # This prunes noise significantly.
-    processed = {}
-    for word, count in counts.items():
-        freq = count / total_words
-        if freq >= 0.0005 or count >= 2:
-            processed[word] = round(freq, 6)
-            
-    return processed
 
-def main(library_dir=None):
+def push_keywords_to_db(keywords_updated):
+    """Copy regenerated keywords into ChromaDB metadata (no re-embedding needed)."""
+    if not keywords_updated:
+        return
+    import chromadb
+    from config import CHROMA_DB_PATH
+    collection = chromadb.PersistentClient(path=CHROMA_DB_PATH).get_collection("research_library")
+    existing = collection.get(ids=list(keywords_updated), include=["metadatas"])
+    metas = []
+    for doc_id, meta in zip(existing["ids"], existing["metadatas"]):
+        meta = dict(meta or {})
+        meta["keywords"] = ", ".join(keywords_updated[doc_id])
+        metas.append(meta)
+    if metas:
+        collection.update(ids=existing["ids"], metadatas=metas)
+    logger.info(f"Updated keywords of {len(metas)} papers in ChromaDB")
+
+
+def main(library_dir=None, write_keywords=True, update_db=False):
     lib_path = Path(library_dir) if library_dir else LIBRARY_DIR
     if not lib_path.exists():
         logger.error(f"Library directory not found: {lib_path}")
-        return
-
-    global_index = {}
-    papers_processed = 0
-
-    # 1. Process all papers
-    for doc_dir in lib_path.iterdir():
-        if not doc_dir.is_dir():
-            continue
-            
-        hash_id = doc_dir.name
-        text_path = doc_dir / "preprocessed_text.txt"
-        if not text_path.exists():
-            text_path = doc_dir / "full_text.txt"
-            
-        if not text_path.exists():
-            continue
-            
-        try:
-            text = text_path.read_text(encoding='utf-8', errors='ignore')
-            bow = process_text(text)
-            
-            if not bow:
-                continue
-                
-            # Save local bow.json for the paper
-            bow_path = doc_dir / "bow.json"
-            with open(bow_path, "w") as f:
-                json.dump(bow, f)
-                
-            # Add to global inverted index
-            # Compact format: [hash, freq] instead of {"hash": h, "freq": f}
-            for word, freq in bow.items():
-                if word not in global_index:
-                    global_index[word] = []
-                global_index[word].append([hash_id, freq])
-                
-            papers_processed += 1
-            if papers_processed % 100 == 0:
-                logger.info(f"Processed {papers_processed} papers...")
-        except Exception as e:
-            logger.warning(f"Error processing BOW for {hash_id}: {e}")
-
-    # 2. Prune and sort global index
-    logger.info("Sorting and pruning global index...")
-    pruned_index = {}
-    for word, entries in global_index.items():
-        # Sort by frequency
-        entries.sort(key=lambda x: x[1], reverse=True)
-        # Only keep top 100 papers for each word to avoid massive indexing of common technical terms
-        pruned_index[word] = entries[:100]
-
-    # 3. Save optimized global inverted index
+        return None
     index_path = BOW_INDEX_PATH if not library_dir else lib_path / "global_bow_index.json"
-    try:
-        index_path.parent.mkdir(parents=True, exist_ok=True)
-        # Using separators for more compact JSON (no spaces)
-        with open(index_path, "w") as f:
-            json.dump(pruned_index, f, separators=(',', ':'))
-        logger.info(f"Successfully generated optimized BOW index for {papers_processed} papers.")
-        logger.info(f"Final index size: {index_path.stat().st_size / 1024 / 1024:.2f} MB")
-    except Exception as e:
-        logger.error(f"Failed to write global index: {e}")
+    stats = build_bow_index(lib_path, index_path, write_keywords=write_keywords)
+    logger.info(f"Indexed {stats['papers']} papers ({stats['terms']} terms) -> {index_path}")
+    if update_db:
+        push_keywords_to_db(stats.get("keywords_updated"))
+    return stats
+
 
 if __name__ == "__main__":
-    base_dir = Path(__file__).resolve().parent.parent
-    os.chdir(base_dir)
-    main()
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--library", default=None, help="Library directory (default: DATA_DIR/library)")
+    parser.add_argument("--no-keywords", action="store_true", help="Do not write TF-IDF keywords to metadata.json")
+    parser.add_argument("--update-db", action="store_true",
+                        help="Also copy new keywords into ChromaDB (stop the server first)")
+    args = parser.parse_args()
+    os.chdir(Path(__file__).resolve().parent.parent)
+    main(args.library, write_keywords=not args.no_keywords, update_db=args.update_db)

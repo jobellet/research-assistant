@@ -35,6 +35,7 @@ dependencies:
     - gdown
     - chromadb
     - bibtexparser
+    - python-docx
     - python-multipart
     - einops
     - hf_transfer

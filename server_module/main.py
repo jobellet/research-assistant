@@ -12,9 +12,14 @@ def load_env():
     env_path = Path(".env")
     if env_path.exists():
         for line in env_path.read_text().splitlines():
-            if line.strip() and not line.startswith("#"):
-                key, value = line.split("=", 1)
-                os.environ[key.strip()] = value.strip().strip('"').strip("'")
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            if key.startswith("export "):
+                key = key[len("export "):].strip()
+            os.environ.setdefault(key, value.strip().strip('"').strip("'"))
 
 load_env()
 
@@ -37,7 +42,10 @@ from graph_module.graph_builder import build_semantic_graph, compute_focus_dista
 from graph_module.citation_fetcher import build_citation_graph
 from graph_module.neighbor_graph import build_neighbor_graph_bow
 from audit_module.claim_auditor import audit_claims
-from config import LIBRARY_DIR, EXTERNAL_LIBRARY_PATH, BOW_INDEX_PATH, CHROMA_DB_PATH
+from config import LIBRARY_DIR, EXTERNAL_LIBRARY_PATH, BOW_INDEX_PATH, CHROMA_DB_PATH, DATA_DIR
+from discovery_module import discover as discovery
+import re
+import subprocess
 import threading
 
 # Configure logging
@@ -60,11 +68,12 @@ mutex = ServerMutex()
 searcher = None
 bow_searcher = None
 processor = None
-citation_manager = CitationManager()
 _graph_cache = None           # in-memory graph cache
 _graph_building = False       # lock flag for background build
 
 PROJECTS_DIR = Path("projects")
+INVENTORY_PATH = DATA_DIR / "papers_inventory.csv"
+PROTECTED_PROJECTS = {"default"}
 
 # --- Models ---
 
@@ -107,12 +116,21 @@ class ClaimAuditRequest(BaseModel):
 
 # --- Helpers ---
 
+def sanitize_project_name(name: str) -> str:
+    """Keep letters, digits, '-', '_', '.', spaces; refuse '.', '..' and hidden names."""
+    safe_name = "".join(c for c in (name or "") if c.isalnum() or c in "-_. ").strip()
+    if not safe_name or safe_name.startswith(".") or set(safe_name) <= {"."}:
+        raise HTTPException(status_code=400, detail="Invalid project name.")
+    return safe_name
+
+
 def get_project_path(name: str) -> Path:
     """Resolve and validate a project path, preventing path traversal."""
-    safe_name = "".join(c for c in name if c.isalnum() or c in "-_. ").strip()
-    if not safe_name:
+    safe_name = sanitize_project_name(name)
+    path = PROJECTS_DIR / safe_name
+    if path.resolve().parent != PROJECTS_DIR.resolve():
         raise HTTPException(status_code=400, detail="Invalid project name.")
-    return PROJECTS_DIR / safe_name
+    return path
 
 def ensure_project_exists(name: str) -> Path:
     path = get_project_path(name)
@@ -178,7 +196,12 @@ def startup_event():
 
     # 3. Initialize Processor
     try:
-        processor = ManuscriptProcessor(library_dir=LIBRARY_DIR, inbox_dir=EXTERNAL_LIBRARY_PATH)
+        processor = ManuscriptProcessor(
+            library_dir=LIBRARY_DIR,
+            inbox_dir=EXTERNAL_LIBRARY_PATH,
+            db_manager=searcher.db_manager if searcher else None,  # load the embedding model once
+            on_library_changed=_on_library_changed,
+        )
         logger.info("Processor initialized.")
     except Exception as e:
         logger.error(f"Failed to initialize processor: {e}")
@@ -197,20 +220,57 @@ def startup_event():
         t = threading.Thread(target=_background_build_graph, daemon=True)
         t.start()
 
-def _background_build_graph(force: bool = False):
-    """Build the semantic graph in a background thread."""
-    global _graph_cache, _graph_building
-    if _graph_building:
-        return
-    _graph_building = True
+def _on_library_changed():
+    """Called by the processor after new papers were added: refresh indexes and graph."""
+    global _graph_cache
+    if bow_searcher:
+        bow_searcher.load_index()
+    _graph_cache = None
+    # citation links involve the new papers too: rebuild them on next request
     try:
-        logger.info("[Graph] Background build started…")
-        _graph_cache = build_semantic_graph(searcher.db_manager, force_rebuild=force)
-        logger.info(f"[Graph] Build complete: {_graph_cache['stats']['n_nodes']} nodes, {_graph_cache['stats']['n_edges']} edges.")
+        from config import CITATION_GRAPH_PATH
+        CITATION_GRAPH_PATH.unlink(missing_ok=True)
+    except Exception as e:
+        logger.warning(f"Could not reset citation cache: {e}")
+    if searcher:
+        threading.Thread(target=_background_build_graph, args=(True,), daemon=True).start()
+
+
+_graph_rebuild_pending = False
+_graph_forced = False          # a user-requested rebuild is running or queued
+_graph_lock = threading.Lock()
+
+
+def _background_build_graph(force: bool = False):
+    """Build the semantic graph in a background thread.
+
+    A forced rebuild requested while another build runs is queued and runs
+    right after it (previously it was silently dropped).
+    """
+    global _graph_cache, _graph_building, _graph_rebuild_pending, _graph_forced
+    with _graph_lock:
+        if force:
+            _graph_forced = True
+        if _graph_building:
+            if force:
+                _graph_rebuild_pending = True
+            return
+        _graph_building = True
+    try:
+        while True:
+            logger.info("[Graph] Background build started…")
+            _graph_cache = build_semantic_graph(searcher.db_manager, force_rebuild=force)
+            logger.info(f"[Graph] Build complete: {_graph_cache['stats']['n_nodes']} nodes, {_graph_cache['stats']['n_edges']} edges.")
+            with _graph_lock:
+                if not _graph_rebuild_pending:
+                    break
+                _graph_rebuild_pending = False
+                force = True
     except Exception as e:
         logger.error(f"[Graph] Background build failed: {e}")
     finally:
         _graph_building = False
+        _graph_forced = False
 
 @app.on_event("shutdown")
 def shutdown_event():
@@ -281,88 +341,84 @@ def stop_processing():
     processor.stop()
     return {"status": "stopped"}
 
+REQUIRED_FIELDS = ("title", "authors", "year", "doi", "summary", "keywords")
+
+
+def _read_metadata(hash_dir: Path) -> Optional[dict]:
+    meta_path = hash_dir / "metadata.json"
+    if not meta_path.exists():
+        return None
+    try:
+        return json.loads(meta_path.read_text())
+    except Exception:
+        return {}
+
+
 @app.get("/api/papers", dependencies=[Depends(verify_auth_token)])
 def list_papers():
-    """List ingested papers with their metadata status (filesystem based)."""
-    library_path = Path("library")
-    if not library_path.exists():
+    """List ingested papers with their processing status and missing metadata (filesystem based)."""
+    if not LIBRARY_DIR.exists():
         return []
 
     papers = []
-    for hash_dir in library_path.iterdir():
+    for hash_dir in sorted(LIBRARY_DIR.iterdir()):
         if not hash_dir.is_dir():
             continue
-
-        info = {"hash": hash_dir.name, "title": "Unknown", "status": "Ingested"}
-
-        meta_path = hash_dir / "metadata.json"
-        if meta_path.exists():
-            try:
-                with open(meta_path, 'r') as f:
-                    meta = json.load(f)
-                info["title"] = meta.get("title", "Unknown")
-                info["status"] = "Processed"
-            except:
-                info["status"] = "Corrupt Metadata"
-
+        pdfs = sorted(hash_dir.glob("*.pdf"))
+        info = {"hash": hash_dir.name, "filename": pdfs[0].name if pdfs else "", "title": "Unknown",
+                "authors": [], "year": "", "status": "Ingested", "missing_fields": list(REQUIRED_FIELDS)}
+        meta = _read_metadata(hash_dir)
+        if meta is None:
+            papers.append(info)
+            continue
+        if meta == {}:
+            info["status"] = "Corrupt Metadata"
+            papers.append(info)
+            continue
+        authors = meta.get("authors") or []
+        info.update({
+            "title": meta.get("title") or "Unknown",
+            "authors": authors if isinstance(authors, list) else [a.strip() for a in str(authors).split(",") if a.strip()],
+            "year": meta.get("year", ""),
+            "filename": meta.get("pdf_filename") or info["filename"],
+            "status": "Processed",
+            "missing_fields": [f for f in REQUIRED_FIELDS if not meta.get(f)],
+        })
         papers.append(info)
     return papers
 
+def _library_entry(hash_dir: Path, meta: dict) -> dict:
+    authors = meta.get("authors") or []
+    keywords = meta.get("keywords") or []
+    return {
+        "hash_id": hash_dir.name,
+        "metadata": {
+            "title": meta.get("title", ""),
+            "authors": ", ".join(authors) if isinstance(authors, list) else str(authors),
+            "year": meta.get("year", ""),
+            "journal": meta.get("journal", ""),
+            "doi": meta.get("doi", ""),
+            "keywords": ", ".join(keywords) if isinstance(keywords, list) else str(keywords),
+            "pdf_filename": meta.get("pdf_filename", ""),
+        },
+        "files": [{"filename": f.name, "source": "local"} for f in sorted(hash_dir.glob("*.pdf"))],
+    }
+
+
 @app.get("/api/library", dependencies=[Depends(verify_auth_token)])
 def get_library():
-    """Get all indexed papers from papers_inventory.csv (fast) or ChromaDB for the library view."""
+    """All papers of the library (read from each paper's metadata.json), newest year first."""
     papers = []
-    inventory_path = Path("papers_inventory.csv")
-    
-    if inventory_path.exists():
-        try:
-            with open(inventory_path, 'r', encoding='utf-8') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    metadata = {
-                        "title": row.get("title", ""),
-                        "authors": row.get("authors", ""),
-                        "pdf_filename": row.get("pdf_filename", ""),
-                        "doi": row.get("doi", ""),
-                        "keywords": "" # Usually not in CSV, but ensures no KeyError in frontend
-                    }
-                    papers.append({
-                        "hash_id": row.get("hash", ""),
-                        "metadata": metadata
-                    })
-            return {"papers": papers}
-        except Exception as e:
-            logger.error(f"Failed to read inventory CSV: {e}")
-            # Fall through to ChromaDB on error
-            pass
-
-    # Fallback to ChromaDB
-    if not searcher:
-        raise HTTPException(status_code=500, detail="Search engine not available.")
-    try:
-        # Avoid fetching the entire DB without IDs to prevent full-table scans
-        # Instead, fetch IDs first using an empty include, or gather from filesystem.
-        all_ids = searcher.db_manager.collection.get(include=[])["ids"]
-        if all_ids:
-            # Fetch metadatas for specifically these IDs
-            results = searcher.db_manager.collection.get(ids=all_ids, include=["metadatas"])
-            for i in range(len(results["ids"])):
-                hash_id = results["ids"][i]
-                metadata = results["metadatas"][i] or {}
-                
-                # Detect files for this hash
-                pdf_filename = metadata.get("pdf_filename")
-                all_files = searcher.find_all_pdfs(hash_id, pdf_filename=pdf_filename)
-                
-                papers.append({
-                    "hash_id": hash_id,
-                    "metadata": metadata,
-                    "files": all_files
-                })
-        return {"papers": papers}
-    except Exception as e:
-        logger.error(f"Failed to fetch library from Chroma: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    if LIBRARY_DIR.exists():
+        for hash_dir in LIBRARY_DIR.iterdir():
+            if not hash_dir.is_dir():
+                continue
+            meta = _read_metadata(hash_dir)
+            if meta:
+                papers.append(_library_entry(hash_dir, meta))
+    papers.sort(key=lambda p: (str(p["metadata"].get("year") or ""), p["metadata"].get("title", "").lower()),
+                reverse=True)
+    return {"papers": papers}
 
 @app.get("/api/library/text/{hash_id}", dependencies=[Depends(verify_auth_token)])
 def get_library_text(hash_id: str):
@@ -371,8 +427,10 @@ def get_library_text(hash_id: str):
     possible_names = ["full_text.txt", "preprocessed_text.txt", "extracted_text.txt"]
     txt_path = None
     
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", hash_id):
+        raise HTTPException(status_code=400, detail="Invalid paper id.")
     for name in possible_names:
-        p = Path("library") / hash_id / name
+        p = LIBRARY_DIR / hash_id / name
         if p.exists():
             txt_path = p
             break
@@ -395,7 +453,7 @@ def get_papers_of_the_day():
     import requests
     import time
     
-    library_dir = Path("library")
+    library_dir = LIBRARY_DIR
     library_dois = set()
     cited_counts = Counter()
     paper_info = {}
@@ -509,7 +567,7 @@ def get_papers_of_the_day():
 @app.get("/api/seminal_papers", dependencies=[Depends(verify_auth_token)])
 def get_seminal_papers():
     """Return top papers that our library papers cite, which are not in our library."""
-    library_dir = Path("library")
+    library_dir = LIBRARY_DIR
     library_dois = set()
     ref_counts = Counter()
     ref_info = {}
@@ -546,16 +604,64 @@ def get_seminal_papers():
                         }
         except: continue
 
-    # 3. Get top 20
+    # 3. Drop references that are in the library under another form (title only)
+    library_titles = set()
+    for meta_file in library_dir.glob("*/metadata.json"):
+        try:
+            t = json.loads(meta_file.read_text()).get("title") or ""
+        except Exception:
+            continue
+        t = " ".join(re.sub(r"[^a-z0-9 ]", " ", t.lower()).split())
+        if len(t) > 20:
+            library_titles.add(t)
+
+    def in_library(ref: str) -> bool:
+        r = " ".join(re.sub(r"[^a-z0-9 ]", " ", (ref or "").lower()).split())
+        return any(t in r for t in library_titles)
+
+    # 4. Top 20, with titles of DOI references resolved through Crossref (cached)
     top_seminal = []
-    for key, count in ref_counts.most_common(20):
+    for key, count in ref_counts.most_common():
+        if len(top_seminal) >= 20:
+            break
         info = ref_info[key]
-        # If it's a DOI, try to get a cleaner title from Crossref (cached/fast if possible)
-        # For now, we return what we have
+        if not info.get("doi") and in_library(info.get("raw_ref", "")):
+            continue
         info["cite_count"] = count
         top_seminal.append(info)
-
+    _resolve_doi_titles(top_seminal)
     return {"seminal_papers": top_seminal}
+
+
+def _resolve_doi_titles(items: list):
+    """Fill 'title' for DOI-only references (one Crossref request, cached on disk)."""
+    cache_path = LIBRARY_DIR / "doi_titles_cache.json"
+    try:
+        cache = json.loads(cache_path.read_text()) if cache_path.exists() else {}
+    except Exception:
+        cache = {}
+    missing = [i["doi"] for i in items if i.get("doi") and i["doi"] not in cache]
+    if missing:
+        import requests
+        try:
+            resp = requests.get("https://api.crossref.org/works",
+                                params={"filter": ",".join(f"doi:{d}" for d in missing), "rows": len(missing)},
+                                timeout=20)
+            if resp.status_code == 200:
+                for it in resp.json().get("message", {}).get("items", []):
+                    title = (it.get("title") or [""])[0]
+                    year = ((it.get("issued") or {}).get("date-parts") or [[None]])[0][0]
+                    cache[(it.get("DOI") or "").lower()] = {"title": title, "year": year}
+                cache_path.write_text(json.dumps(cache))
+        except Exception as e:
+            logger.warning(f"Crossref title lookup failed: {e}")
+    for i in items:
+        hit = cache.get((i.get("doi") or "").lower())
+        if hit and hit.get("title"):
+            i["title"] = hit["title"]
+            i["year"] = hit.get("year")
+        elif i.get("doi") and i.get("title") == "Loading title...":
+            i["title"] = i["doi"]
 
 @app.post("/api/audit/claims", dependencies=[Depends(verify_auth_token)])
 def audit_manuscript_claims(request: ClaimAuditRequest):
@@ -570,126 +676,115 @@ def audit_manuscript_claims(request: ClaimAuditRequest):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+def _known_author_words() -> set:
+    """Surname-like words of library authors (used to detect '... by Butlin' queries)."""
+    words = set()
+    if LIBRARY_DIR.exists():
+        for meta_path in LIBRARY_DIR.glob("*/metadata.json"):
+            try:
+                authors = json.loads(meta_path.read_text()).get("authors") or []
+            except Exception:
+                continue
+            if isinstance(authors, str):
+                authors = authors.split(",")
+            for a in authors:
+                parts = str(a).split()
+                if parts and len(parts[-1]) > 2:
+                    words.add(parts[-1].lower())
+    return words
+
+
+def _passes_filters(metadata: dict, author: Optional[str], journal: Optional[str]) -> bool:
+    if author and author.lower() not in str(metadata.get("authors", "")).lower():
+        return False
+    if journal and journal.lower() not in str(metadata.get("journal", "")).lower():
+        return False
+    return True
+
+
+def _run_search(request: "QueryRequest", year: Optional[int], author: Optional[str], journal: Optional[str]) -> list:
+    """One search pass. Year is filtered in ChromaDB; author/journal are substring
+    filters applied afterwards (ChromaDB has no substring operator on metadata)."""
+    where = {"year": year} if year else None
+    post_filter = bool(author or journal)
+    fetch_n = request.n_results * 5 if post_filter else request.n_results
+    try:
+        fetch_n = max(1, min(fetch_n, searcher.db_manager.collection.count()))
+    except Exception:
+        pass
+
+    if request.method == "bow":
+        if not bow_searcher:
+            raise HTTPException(status_code=500, detail="BOW search engine not available.")
+        hits = bow_searcher.search(request.query, top_k=max(fetch_n, request.n_results * 5))
+        enriched = []
+        for res in hits:
+            get_kwargs = {"ids": [res["hash_id"]], "include": ["metadatas", "documents"]}
+            if where:
+                get_kwargs["where"] = where
+            meta_res = searcher.db_manager.collection.get(**get_kwargs)
+            if not meta_res or not meta_res["ids"]:
+                continue
+            metadata = meta_res["metadatas"][0]
+            enriched.append({
+                "hash_id": res["hash_id"],
+                "score": res["score"],
+                "metadata": metadata,
+                "summary": meta_res["documents"][0],
+                "files": searcher.find_all_pdfs(res["hash_id"], pdf_filename=metadata.get("pdf_filename")),
+                "method": "bow",
+            })
+        results = enriched
+    else:
+        results = searcher.search(request.query, n_results=fetch_n, where=where)
+
+    if post_filter:
+        results = [r for r in results if _passes_filters(r.get("metadata") or {}, author, journal)]
+    results = results[: request.n_results]
+    # ChromaDB stores the text used for embedding (title + authors + ...);
+    # show the paper's abstract instead.
+    for r in results:
+        meta = _read_metadata(LIBRARY_DIR / r["hash_id"]) if re.fullmatch(r"[A-Za-z0-9_-]+", r.get("hash_id", "")) else None
+        if meta and meta.get("summary"):
+            r["summary"] = meta["summary"]
+    return results
+
+
 @app.post("/api/search", dependencies=[Depends(verify_auth_token)])
 def search_papers(request: QueryRequest):
+    """Semantic ('semantic') or word-frequency ('bow') search of the library.
+
+    Explicit filters (year/author/journal) are strict. A year or a library
+    author's surname mentioned in the query text is used as a *soft* filter:
+    if nothing matches it, the search is repeated without it.
+    """
     if not searcher:
         raise HTTPException(status_code=500, detail="Search engine not available.")
     try:
-        import re
-        import csv
-
-        # 1. Start with explicit filters
-        filters = {}
-        if request.year:
-            filters["year"] = request.year
-        if request.author:
-            filters["author"] = request.author
-        if request.journal:
-            filters["journal"] = request.journal
-
-        # 2. Add implicit filters from query text
-        # Check for year
-        if "year" not in filters:
-            year_match = re.search(r'\b(19\d{2}|20\d{2})\b', request.query)
-            if year_match:
-                filters["year"] = int(year_match.group(1))
-
-        # Check for known authors
-        if "author" not in filters:
-            known_authors = set()
-            inventory_path = Path("papers_inventory.csv")
-            if inventory_path.exists():
-                try:
-                    with open(inventory_path, 'r', encoding='utf-8') as f:
-                        reader = csv.DictReader(f)
-                        for row in reader:
-                            author_str = row.get("authors", "")
-                            if author_str:
-                                # Simple split by comma or semicolon
-                                for a in author_str.replace(";", ",").split(","):
-                                    a = a.strip()
-                                    if a:
-                                        # only add simple last names or specific words
-                                        for word in a.split():
-                                            if len(word) > 2:
-                                                known_authors.add(word.lower())
-                except:
-                    pass
-
-            query_words = request.query.lower().split()
-            found_author = None
-            for word in query_words:
-                if word in known_authors and word not in ["the", "and", "for", "with"]:
-                    found_author = word
+        implicit_year = None
+        implicit_author = None
+        # Only short, query-like inputs get implicit filters; a highlighted
+        # sentence from the draft is searched as-is.
+        short_query = len(request.query.split()) <= 8
+        if short_query and not request.year:
+            m = re.search(r"\b(19\d{2}|20\d{2})\b", request.query)
+            if m:
+                implicit_year = int(m.group(1))
+        if short_query and not request.author:
+            known = _known_author_words()
+            for word in re.findall(r"[a-zà-ÿ'-]+", request.query.lower()):
+                if word in known and word not in {"the", "and", "for", "with"}:
+                    implicit_author = word
                     break
 
-            if found_author:
-                filters["author"] = found_author
-
-        # 3. Construct ChromaDB `where` clause
-        where_clause = None
-        conditions = []
-
-        if "year" in filters:
-            conditions.append({"year": filters["year"]})
-
-        if "author" in filters:
-            # $contains works on strings in ChromaDB
-            conditions.append({"authors": {"$contains": filters["author"]}})
-
-        if "journal" in filters:
-            conditions.append({"journal": {"$contains": filters["journal"]}})
-
-        if len(conditions) == 1:
-            where_clause = conditions[0]
-        elif len(conditions) > 1:
-            where_clause = {"$and": conditions}
-
-        if request.method == "bow":
-            if not bow_searcher:
-                raise HTTPException(status_code=500, detail="BOW search engine not available.")
-            
-            # Bow search returns list of {hash_id, score, method}
-            # Retrieve more to account for post-filtering
-            results = bow_searcher.search(request.query, top_k=request.n_results * 5)
-            
-            # Enrich results with metadata and files using existing searcher logic
-            enriched = []
-            for res in results:
-                if len(enriched) >= request.n_results:
-                    break
-
-                hash_id = res["hash_id"]
-                
-                # If we have a where_clause, we can just fetch via get with where
-                get_kwargs = {"ids": [hash_id], "include": ["metadatas", "documents"]}
-                if where_clause:
-                    get_kwargs["where"] = where_clause
-
-                # We'll do a single query to get the specific document from ChromaDB (to get metadata)
-                meta_res = searcher.db_manager.collection.get(**get_kwargs)
-
-                # If meta_res is empty, it means either it doesn't exist or it was filtered out by where clause
-                if meta_res and meta_res["ids"]:
-                    metadata = meta_res["metadatas"][0]
-                    summary = meta_res["documents"][0]
-                else:
-                    continue # Filtered out
-                
-                pdf_filename = metadata.get("pdf_filename")
-                all_files = searcher.find_all_pdfs(hash_id, pdf_filename=pdf_filename)
-                
-                enriched.append({
-                    "hash_id": hash_id,
-                    "score": res["score"],
-                    "metadata": metadata,
-                    "summary": summary,
-                    "files": all_files,
-                    "method": "bow"
-                })
-            return enriched
-        else:
-            return searcher.search(request.query, n_results=request.n_results, where=where_clause)
+        year = request.year or implicit_year
+        author = request.author or implicit_author
+        results = _run_search(request, year, author, request.journal)
+        if not results and (implicit_year or implicit_author):
+            results = _run_search(request, request.year, request.author, request.journal)
+        return results
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Search failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -727,7 +822,7 @@ def start_chat_worker():
     import subprocess
     from pathlib import Path
     
-    url_file = Path("library/.llm_worker_url")
+    url_file = LIBRARY_DIR / ".llm_worker_url"
     if url_file.exists():
         return {"status": "ready"}
         
@@ -757,7 +852,7 @@ def chat_worker_status():
     from pathlib import Path
     import requests
     
-    url_file = Path("library/.llm_worker_url")
+    url_file = LIBRARY_DIR / ".llm_worker_url"
     if url_file.exists():
         url = url_file.read_text().strip()
         try:
@@ -783,7 +878,7 @@ def stop_chat_worker():
     import subprocess
     from pathlib import Path
     
-    url_file = Path("library/.llm_worker_url")
+    url_file = LIBRARY_DIR / ".llm_worker_url"
     if url_file.exists():
         try:
             url_file.unlink()
@@ -822,6 +917,9 @@ def get_semantic_graph():
     if not searcher:
         raise HTTPException(status_code=500, detail="Searcher not initialized.")
     global _graph_cache
+    if _graph_forced:
+        return {"status": "building", "message": "Graph is being rebuilt. Please retry in a few seconds.",
+                "nodes": [], "edges": [], "clusters": [], "gaps": [], "stats": {}}
     if _graph_cache:
         return _graph_cache
     # Cache not ready yet — try loading from disk
@@ -851,25 +949,49 @@ def graph_focus(req: FocusRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+_citations_building = False
+
+
+def _background_build_citations():
+    global _citations_building
+    try:
+        build_citation_graph(searcher.db_manager, force_rebuild=True)
+    except Exception as e:
+        logger.error(f"[Citations] build failed: {e}")
+    finally:
+        _citations_building = False
+
+
 @app.get("/api/graph/citations", dependencies=[Depends(verify_auth_token)])
 def get_citation_graph():
-    """Return citation edges from Semantic Scholar (cached)."""
+    """Citation links between library papers (Semantic Scholar).
+
+    Building them takes about a second per paper (API rate limits), so the
+    first call starts a background build and returns ``{"status": "building"}``;
+    poll until edges are returned.
+    """
+    global _citations_building
     if not searcher:
         raise HTTPException(status_code=500, detail="Search engine not available.")
-    try:
-        return build_citation_graph(searcher.db_manager, force_rebuild=False)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    from graph_module.citation_fetcher import _load_citation_cache
+    cached = _load_citation_cache()
+    if cached:
+        return cached
+    if not _citations_building:
+        _citations_building = True
+        threading.Thread(target=_background_build_citations, daemon=True).start()
+    return {"status": "building", "edges": [],
+            "message": "Fetching references from Semantic Scholar (about 1 s per paper)…"}
+
 
 @app.post("/api/graph/rebuild", dependencies=[Depends(verify_auth_token)])
 def rebuild_graph(background_tasks: BackgroundTasks):
     """Force-rebuild the semantic graph cache in the background."""
     if not searcher:
         raise HTTPException(status_code=500, detail="Search engine not available.")
-    if _graph_building:
-        return {"status": "already_building"}
+    queued = _graph_building
     background_tasks.add_task(_background_build_graph, True)
-    return {"status": "rebuild_started"}
+    return {"status": "rebuild_queued" if queued else "rebuild_started"}
 
 # Legacy endpoint kept for backwards compat
 @app.get("/api/graph", dependencies=[Depends(verify_auth_token)])
@@ -890,20 +1012,24 @@ def list_projects():
 def create_project(req: ProjectCreateRequest):
     """Create a new project folder with starter files."""
     project_path = get_project_path(req.name)
+    name = project_path.name
     if project_path.exists():
-        raise HTTPException(status_code=409, detail=f"Project '{req.name}' already exists.")
+        raise HTTPException(status_code=409, detail=f"Project '{name}' already exists.")
     project_path.mkdir(parents=True)
     (project_path / "draft.tex").write_text(
-        f"% Project: {req.name}\n\\documentclass{{article}}\n\\begin{{document}}\n\n\\end{{document}}\n"
+        f"% Project: {name}\n\\documentclass{{article}}\n\\begin{{document}}\n\n"
+        f"\\bibliographystyle{{plain}}\n\\bibliography{{references}}\n\\end{{document}}\n"
     )
     (project_path / "references.bib").write_text("")
-    logger.info(f"Created project: {req.name}")
-    return {"status": "created", "name": req.name}
+    logger.info(f"Created project: {name}")
+    return {"status": "created", "name": name}
 
 @app.delete("/api/projects/{name}", dependencies=[Depends(verify_auth_token)])
 def delete_project(name: str):
     """Delete a project and all its files."""
     project_path = ensure_project_exists(name)
+    if project_path.name in PROTECTED_PROJECTS:
+        raise HTTPException(status_code=400, detail=f"The '{project_path.name}' project cannot be deleted.")
     import shutil
     shutil.rmtree(project_path)
     logger.info(f"Deleted project: {name}")
@@ -949,8 +1075,11 @@ def add_citation(request: CitationAddRequest):
         if not data["ids"]:
             raise HTTPException(status_code=404, detail="Paper not found")
 
-        metadata = data["metadatas"][0]
-        metadata["summary"] = data["documents"][0]
+        metadata = dict(data["metadatas"][0] or {})
+        # metadata.json has the richest information (author list, arXiv id, journal)
+        file_meta = _read_metadata(LIBRARY_DIR / hash_id) if re.fullmatch(r"[A-Za-z0-9_-]+", hash_id) else None
+        if file_meta:
+            metadata.update({k: v for k, v in file_meta.items() if v})
         metadata["hash"] = hash_id
 
         cm = CitationManager(bib_path=str(bib_path))
@@ -974,6 +1103,80 @@ def get_neighbor_graph(hash_id: str):
         logger.error(f"Failed to build neighbor graph for {hash_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# --- Literature discovery (arXiv / Semantic Scholar / OpenAlex / Crossref) ---
+
+class DiscoverSearchRequest(BaseModel):
+    query: str
+    sources: List[str] = ["arxiv", "openalex", "semantic_scholar"]
+    limit: int = 15
+    year: Optional[str] = ""
+
+
+class DiscoverTextRequest(BaseModel):
+    text: str
+    limit: int = 15
+
+
+class DiscoverFetchRequest(BaseModel):
+    identifier: Optional[str] = None          # arXiv id, arXiv URL or DOI
+    candidate: Optional[Dict[str, Any]] = None  # a result returned by the search endpoints
+    process: bool = True                        # start the processor so the paper gets indexed
+
+
+def _load_bow_index() -> Optional[dict]:
+    if bow_searcher and bow_searcher.index:
+        return bow_searcher.index
+    return None
+
+
+@app.post("/api/discover/search", dependencies=[Depends(verify_auth_token)])
+def discover_search(req: DiscoverSearchRequest):
+    """Search external databases; results say whether a paper is already in the library."""
+    if not req.query.strip():
+        raise HTTPException(status_code=400, detail="Empty query.")
+    return discovery.search_literature(req.query, sources=req.sources, limit=min(req.limit, 50),
+                                       year=req.year or "", library_dir=LIBRARY_DIR)
+
+
+@app.post("/api/discover/text", dependencies=[Depends(verify_auth_token)])
+def discover_for_text(req: DiscoverTextRequest):
+    """Find external literature relevant to a passage of the draft."""
+    if len(req.text.strip()) < 10:
+        raise HTTPException(status_code=400, detail="Text too short.")
+    return discovery.related_to_text(req.text, limit=min(req.limit, 50), library_dir=LIBRARY_DIR,
+                                     bow_index=_load_bow_index())
+
+
+@app.get("/api/discover/related/{hash_id}", dependencies=[Depends(verify_auth_token)])
+def discover_related(hash_id: str, limit: int = 15):
+    """Papers related to a library paper (S2 recommendations, OpenAlex related works, citing papers, arXiv)."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", hash_id):
+        raise HTTPException(status_code=400, detail="Invalid paper id.")
+    meta = _read_metadata(LIBRARY_DIR / hash_id)
+    if not meta:
+        raise HTTPException(status_code=404, detail="Paper not found in library.")
+    seed = dict(meta)
+    if not seed.get("arxiv_id"):
+        from discovery_module.sources import find_arxiv_id
+        seed["arxiv_id"] = find_arxiv_id("", meta.get("pdf_filename", ""))
+    return discovery.related_to_paper(seed, limit=min(limit, 50), library_dir=LIBRARY_DIR)
+
+
+@app.post("/api/discover/fetch", dependencies=[Depends(verify_auth_token)])
+def discover_fetch(req: DiscoverFetchRequest):
+    """Download an open-access PDF into the inbox (and start processing it)."""
+    candidate = req.candidate
+    if not candidate and req.identifier:
+        candidate = discovery.resolve_identifier(req.identifier)
+    if not candidate:
+        raise HTTPException(status_code=400, detail="Give an arXiv id, a DOI or a search result.")
+    result = discovery.download_to_inbox(candidate, EXTERNAL_LIBRARY_PATH, LIBRARY_DIR)
+    if result["status"] == "downloaded" and req.process and processor and not processor.running:
+        processor.start()
+        result["processing"] = True
+    return result
+
+
 # --- Frontend & Dashboard Static Files ---
 
 frontend_path = Path("frontend_module")
@@ -983,7 +1186,23 @@ if frontend_path.exists():
 
 static_path = Path("server_module/static")
 static_path.mkdir(parents=True, exist_ok=True)
+
+
+@app.get("/dashboard", include_in_schema=False)
+@app.get("/dashboard/", include_in_schema=False)
+def dashboard_page():
+    """Backend Monitor (the static folder has no index.html)."""
+    return FileResponse(static_path / "dashboard.html", media_type="text/html")
+
+
 app.mount("/dashboard", StaticFiles(directory=str(static_path), html=True), name="dashboard")
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    """No icon: avoid a 404 in every browser console."""
+    from fastapi.responses import Response
+    return Response(status_code=204)
+
 
 @app.get("/")
 def redirect_to_ui():

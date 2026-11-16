@@ -5,7 +5,7 @@ import getpass
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from extract_module.pdf_utils import extract_text_from_pdf, extract_first_page_as_image
-from extract_module.llm_utils import extract_metadata_with_llm, fast_metadata_extract
+from extract_module.llm_utils import extract_metadata_with_llm, fast_metadata_extract, arxiv_metadata_extract, abstract_from_text
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -76,8 +76,10 @@ def process_paper(hash_dir: Path, model: str, overwrite: bool, delete_pdf: bool,
     elif not metadata_path.exists() or overwrite:
         metadata_context = extract_text_from_pdf(str(pdf_path), max_pages=5)
 
-        # Try Database Lookup (Crossref)
-        metadata = fast_metadata_extract(metadata_context)
+        # Try Database Lookup (arXiv id first: exact and fast; then Crossref)
+        metadata = arxiv_metadata_extract(metadata_context, pdf_path.name)
+        if not metadata:
+            metadata = fast_metadata_extract(metadata_context)
         
         # Smart Retry: Use LLM to find a clue, then verify it
         if not metadata:
@@ -93,6 +95,8 @@ def process_paper(hash_dir: Path, model: str, overwrite: bool, delete_pdf: bool,
 
         if metadata:
             metadata["pdf_filename"] = pdf_path.name
+            if not metadata.get("summary") or metadata["summary"].startswith("No abstract available"):
+                metadata["summary"] = abstract_from_text(metadata_context) or metadata.get("summary", "")
             try:
                 with open(metadata_path, "w") as f:
                     json.dump(metadata, f, indent=4)

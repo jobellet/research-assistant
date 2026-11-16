@@ -706,8 +706,14 @@ iframe#pdf-frame {
     display: none;
   }
 
+  /* .mobile-only forces display:flex !important; keep the overlay hidden
+     until the sidebar is opened, otherwise it blurs and blocks the whole UI */
+  .sidebar-overlay.mobile-only:not(.show) {
+    display: none !important;
+  }
+
   .sidebar-overlay.show {
-    display: block;
+    display: block !important;
   }
 
   /* Main Content adjustments */
@@ -877,3 +883,56 @@ iframe#pdf-frame {
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
   }
 }
+
+/* Discover tab (online literature search) */
+.discover-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--glass-border);
+  margin-bottom: 1rem;
+}
+#discover-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 0.375rem;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  padding: 0.6rem;
+  outline: none;
+}
+.discover-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+.discover-sources label { display: flex; align-items: center; gap: 0.25rem; cursor: pointer; }
+.discover-buttons { display: flex; gap: 0.4rem; }
+.discover-buttons .view-btn { flex: 1; }
+.discover-status { font-size: 0.8rem; color: var(--text-secondary); min-height: 1em; }
+#discover-results { overflow-y: auto; }
+.discover-meta { font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 0.4rem; }
+.discover-abstract {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-bottom: 0.6rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.source-badge {
+  display: inline-block;
+  font-size: 0.68rem;
+  padding: 0.05rem 0.4rem;
+  margin-right: 0.25rem;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  color: var(--text-secondary);
+}
+.source-badge.in-library { border-color: var(--accent-color); color: var(--accent-color); }

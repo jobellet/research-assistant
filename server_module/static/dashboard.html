@@ -302,21 +302,9 @@
                     <span>Process New PDFs</span>
                     <label class="switch"><input type="checkbox" id="process_new_pdfs" checked><span class="slider"></span></label>
                 </div>
-                <div class="toggle-item">
-                    <span>Add DOI</span>
-                    <label class="switch"><input type="checkbox" id="add_doi" checked><span class="slider"></span></label>
-                </div>
-                <div class="toggle-item">
-                    <span>Add Authors</span>
-                    <label class="switch"><input type="checkbox" id="add_authors" checked><span class="slider"></span></label>
-                </div>
-                <div class="toggle-item">
-                    <span>Add Title</span>
-                    <label class="switch"><input type="checkbox" id="add_title" checked><span class="slider"></span></label>
-                </div>
-                <div class="toggle-item">
-                    <span>Find Keywords</span>
-                    <label class="switch"><input type="checkbox" id="find_keyword" checked><span class="slider"></span></label>
+                <div class="toggle-item" title="Full text, verified metadata (arXiv / Crossref: title, authors, year, DOI, journal, abstract) and keywords">
+                    <span>Extract Text &amp; Metadata</span>
+                    <label class="switch"><input type="checkbox" id="extract_metadata" checked><span class="slider"></span></label>
                 </div>
                 <div class="toggle-item">
                     <span>Compute Embeddings</span>
@@ -339,7 +327,7 @@
                 <p style="color: var(--text-muted); font-size: 0.875rem;">Manage your paper library and AI tasks.</p>
             </div>
             <div class="controls">
-                <button class="btn btn-outline" id="sync-btn" title="Refresh Git Repository">Sync Repo</button>
+                <a class="btn btn-outline" id="ui-link" href="/ui/" title="Open the writing interface">Open Editor</a>
                 <div class="status-badge">
                     <div class="pulse" id="status-pulse"></div>
                     <span id="status-text">Processor: Idle</span>
@@ -370,8 +358,28 @@
         const API_BASE = '/api';
         let isRunning = false;
 
+        // Same login as the editor: ?token=..., the tab's session, or a prompt.
+        const TOKEN = (() => {
+            const params = new URLSearchParams(window.location.search);
+            let t = params.get('token') || sessionStorage.getItem('auth_token') || '';
+            if (!t) t = window.prompt('Enter your SERVER_PASSWORD:') || '';
+            if (t) sessionStorage.setItem('auth_token', t);
+            if (params.has('token')) window.history.replaceState({}, '', window.location.pathname);
+            return t;
+        })();
+        const authHeaders = (extra = {}) => ({ 'x-auth-token': TOKEN, ...extra });
+
+        function showError(msg) {
+            document.getElementById('papers-table').innerHTML =
+                `<tr><td colspan="4" style="text-align: center; color: var(--danger);">${msg}</td></tr>`;
+        }
+
         async function fetchStatus() {
-            const res = await fetch(`${API_BASE}/status`);
+            const res = await fetch(`${API_BASE}/status`, { headers: authHeaders() });
+            if (!res.ok) {
+                document.getElementById('status-text').innerText = res.status === 401 ? 'Not logged in' : 'Processor: unavailable';
+                return;
+            }
             const data = await res.json();
             updateStatusUI(data);
         }
@@ -395,15 +403,23 @@
             }
 
             // Sync toggles with current config
-            Object.keys(data.config).forEach(key => {
+            const cfg = data.config || {};
+            Object.keys(cfg).forEach(key => {
                 const el = document.getElementById(key);
-                if (el) el.checked = data.config[key];
+                if (el) el.checked = cfg[key];
             });
+            const extract = document.getElementById('extract_metadata');
+            if (extract) extract.checked = !!(cfg.add_title || cfg.add_authors || cfg.find_keyword);
         }
 
         async function fetchPapers() {
             try {
-                const res = await fetch(`${API_BASE}/papers`);
+                const res = await fetch(`${API_BASE}/papers`, { headers: authHeaders() });
+                if (!res.ok) {
+                    showError(res.status === 401 ? 'Wrong or missing password — reload the page to log in again.' : `Error ${res.status} loading the library.`);
+                    if (res.status === 401) sessionStorage.removeItem('auth_token');
+                    return;
+                }
                 const papers = await res.json();
                 const tbody = document.getElementById('papers-table');
                 
@@ -415,7 +431,7 @@
                 tbody.innerHTML = papers.map(p => `
                     <tr>
                         <td>
-                            <div style="font-weight: 600;">${p.filename}</div>
+                            <div style="font-weight: 600;">${p.filename || '—'}</div>
                             <div class="hash-id">${p.hash.substring(0, 12)}...</div>
                         </td>
                         <td>
@@ -423,11 +439,11 @@
                         </td>
                         <td>
                             <div style="font-weight: 600; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${p.title || 'Unknown Title'}</div>
-                            <div style="color: var(--text-muted); font-size: 0.75rem;">${p.authors.length ? p.authors.join(', ') : 'No authors found'}</div>
+                            <div style="color: var(--text-muted); font-size: 0.75rem; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${(p.authors || []).length ? p.authors.join(', ') : 'No authors found'}</div>
                         </td>
                         <td>
                             <div class="missing-fields">
-                                ${p.missing_fields.map(f => `<span class="missing-tag">${f}</span>`).join('') || '<span class="badge badge-success">Complete</span>'}
+                                ${(p.missing_fields || []).map(f => `<span class="missing-tag">${f}</span>`).join('') || '<span class="badge badge-success">Complete</span>'}
                             </div>
                         </td>
                     </tr>
@@ -451,20 +467,20 @@
                 document.querySelectorAll('#toggles input').forEach(input => {
                     config[input.id] = input.checked;
                 });
+                // one switch drives the three extraction flags of the processor
+                const extract = config.extract_metadata;
+                delete config.extract_metadata;
+                config.add_title = config.add_authors = config.find_keyword = extract;
             }
 
             const res = await fetch(`${API_BASE}/process/${endpoint}`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify(config)
             });
             await fetchStatus();
         });
 
-        document.getElementById('sync-btn').addEventListener('click', async () => {
-            await fetch(`${API_BASE}/sync`, { method: 'POST' });
-            alert('Git sync triggered. Check server logs.');
-        });
 
         // Initialize and Poll
         fetchStatus();

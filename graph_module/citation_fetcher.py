@@ -46,23 +46,41 @@ def _save_citation_cache(data: dict):
     logger.info(f"Citation graph saved → {CITATION_CACHE_PATH}")
 
 
+def _arxiv_from_doi(doi: str) -> str:
+    import re
+    m = re.search(r"10\.48550/arxiv\.(\d{4}\.\d{4,5})", doi or "", re.I)
+    return m.group(1) if m else ""
+
+
 def _query_ss_paper(doi: str) -> Optional[dict]:
     """
-    Query Semantic Scholar for a paper by DOI.
-    Returns raw SS response or None on failure.
+    Query Semantic Scholar for a paper (arXiv DOIs are looked up by arXiv id).
+    ``references.externalIds`` must be requested explicitly, otherwise
+    references come back without DOIs / arXiv ids and nothing can be matched.
     """
-    url = f"{SS_GRAPH}/paper/DOI:{doi}"
-    params = {"fields": "references,title,year,authors,externalIds"}
-    try:
-        resp = requests.get(url, params=params, timeout=10)
+    import os
+    arxiv = _arxiv_from_doi(doi)
+    ref = f"arXiv:{arxiv}" if arxiv else f"DOI:{doi}"
+    url = f"{SS_GRAPH}/paper/{ref}"
+    params = {"fields": "title,year,externalIds,references.externalIds,references.title"}
+    headers = {"x-api-key": os.environ["S2_API_KEY"]} if os.getenv("S2_API_KEY") else {}
+    for attempt in range(4):
+        try:
+            resp = requests.get(url, params=params, headers=headers, timeout=15)
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"SS request error for {doi}: {e}")
+            return None
         if resp.status_code == 200:
             return resp.json()
-        elif resp.status_code == 404:
-            logger.debug(f"DOI not found in SS: {doi}")
-        else:
-            logger.warning(f"SS API returned {resp.status_code} for DOI {doi}")
-    except requests.exceptions.RequestException as e:
-        logger.warning(f"SS request error for {doi}: {e}")
+        if resp.status_code == 404:
+            logger.debug(f"Paper not found in SS: {ref}")
+            return None
+        if resp.status_code == 429:
+            time.sleep(3 * (attempt + 1))   # public API rate limit: back off and retry
+            continue
+        logger.warning(f"SS API returned {resp.status_code} for {ref}")
+        return None
+    logger.warning(f"SS rate limit: giving up on {ref}")
     return None
 
 
@@ -105,6 +123,12 @@ def build_citation_graph(db_manager, force_rebuild: bool = False) -> dict:
             doi_to_hash[doi] = paper_id
             hash_to_doi[paper_id] = doi
 
+    arxiv_to_hash = {_arxiv_from_doi(d): h for d, h in doi_to_hash.items() if _arxiv_from_doi(d)}
+    title_to_hash = {}
+    for i, paper_id in enumerate(all_ids):
+        t = " ".join(((all_metas[i] or {}).get("title") or "").lower().split())
+        if len(t) > 20:
+            title_to_hash[t] = paper_id
     doi_list = list(doi_to_hash.keys())
     logger.info(f"Found {len(doi_list)} papers with DOIs out of {len(all_ids)} total.")
 
@@ -127,10 +151,10 @@ def build_citation_graph(db_manager, force_rebuild: bool = False) -> dict:
         for ref in references:
             ext_ids = ref.get("externalIds") or {}
             ref_doi = (ext_ids.get("DOI") or "").strip().lower()
-            if not ref_doi:
-                continue
-
-            target_hash = doi_to_hash.get(ref_doi)
+            ref_arxiv = (ext_ids.get("ArXiv") or "").strip()
+            ref_title = " ".join((ref.get("title") or "").lower().split())
+            target_hash = (doi_to_hash.get(ref_doi) or arxiv_to_hash.get(ref_arxiv)
+                           or doi_to_hash.get(f"10.48550/arxiv.{ref_arxiv}".lower()) or title_to_hash.get(ref_title))
             if target_hash and target_hash != source_hash:
                 citation_edges.append({
                     "source": source_hash,
@@ -155,7 +179,8 @@ def build_citation_graph(db_manager, force_rebuild: bool = False) -> dict:
         "ss_coverage": round(ss_coverage, 3),
         "built_at": int(time.time()),
     }
-    _save_citation_cache(result_data)
+    if found_count:
+        _save_citation_cache(result_data)   # don't cache a fully rate-limited (empty) result
     logger.info(
         f"Citation graph: {len(unique_edges)} edges, "
         f"SS coverage {ss_coverage:.1%} ({found_count}/{len(doi_list)} DOIs found)"

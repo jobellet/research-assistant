@@ -70,7 +70,8 @@ class DBManager:
             self.collection = self.client.get_collection(name=collection_name)
             # Sample to check dimension
             sample = self.collection.get(include=["embeddings"], limit=1)
-            if sample["embeddings"] and len(sample["embeddings"][0]) != truncate_dim:
+            embs = sample.get("embeddings")
+            if embs is not None and len(embs) > 0 and len(embs[0]) != truncate_dim:
                 logger.warning(f"Dimension mismatch detected in collection '{collection_name}'. "
                                f"Expected {truncate_dim}, but found {len(sample['embeddings'][0])}. Recreating collection...")
                 self.client.delete_collection(name=collection_name)
@@ -115,7 +116,9 @@ class DBManager:
         except (ValueError, TypeError):
             year_val = 0
 
-        embedding_text = text_content or f"{metadata.get('title', '')} {authors_str} {journal_str} {metadata.get('summary', '')} {' '.join(metadata.get('keywords', []))}"
+        keywords = metadata.get("keywords", [])
+        keywords_str = " ".join(keywords) if isinstance(keywords, list) else str(keywords or "")
+        embedding_text = text_content or f"{metadata.get('title', '')} {authors_str} {journal_str} {metadata.get('summary', '')} {keywords_str}"
         
         # Format metadata for ChromaDB (must be string, int, float, or bool)
         clean_metadata = {

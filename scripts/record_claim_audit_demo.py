@@ -30,9 +30,26 @@ STATUS_COLOURS = {
 }
 
 
+_FONT_CANDIDATES = {
+    False: ["DejaVuSansMono.ttf", "/System/Library/Fonts/Menlo.ttc", "/System/Library/Fonts/Monaco.ttf",
+            "/Library/Fonts/Courier New.ttf", "C:/Windows/Fonts/consola.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"],
+    True: ["DejaVuSansMono-Bold.ttf", "/System/Library/Fonts/Menlo.ttc", "C:/Windows/Fonts/consolab.ttf",
+           "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"],
+}
+
+
 def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
-    name = "DejaVuSansMono-Bold.ttf" if bold else "DejaVuSansMono.ttf"
-    return ImageFont.truetype(name, size)
+    """A monospace font available on Linux, macOS or Windows (Pillow default as last resort)."""
+    for name in _FONT_CANDIDATES[bold]:
+        try:
+            return ImageFont.truetype(name, size, index=1 if (bold and name.endswith("Menlo.ttc")) else 0)
+        except OSError:
+            continue
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:  # Pillow < 10.1
+        return ImageFont.load_default()
 
 
 def _draw_wrapped(draw: ImageDraw.ImageDraw, text: str, x: int, y: int, *, width: int,

@@ -178,23 +178,40 @@ async function loadNeighborGraph(neighborId) {
       return;
     }
 
-    // Since these don't have X,Y coordinates from the server, we randomize them
-    // and we'll use a force layout if available or just Sigma's random
-    data.nodes.forEach((n, i) => {
-      n.x = Math.random() * 2 - 1;
-      n.y = Math.random() * 2 - 1;
-      // Assign dummy cluster colors for neighbors if not present
-      n.cluster = n.is_source ? 1 : 0;
-      n.cluster_color = n.is_source ? "#ffffff" : "#6366f1";
-      n.degree = 1; // dummy
+    // Neighbours have no UMAP coordinates: start on a circle around the
+    // source paper and let ForceAtlas2 settle the layout.
+    const degree = {};
+    data.edges.forEach((e) => {
+      degree[e.source] = (degree[e.source] || 0) + 1;
+      degree[e.target] = (degree[e.target] || 0) + 1;
     });
+    data.nodes.forEach((n, i) => {
+      const angle = (2 * Math.PI * i) / data.nodes.length;
+      n.x = n.is_source ? 0 : Math.cos(angle);
+      n.y = n.is_source ? 0 : Math.sin(angle);
+      n.cluster = n.is_source ? 1 : 0;
+      n.cluster_color = n.is_source ? "#10b981" : "#6366f1";
+      n.degree = degree[n.id] || 0;
+    });
+    const source = data.nodes.find((n) => n.is_source) || {};
 
-    // Minimal stats for UI
     data.stats = {
       n_nodes: data.nodes.length,
       n_edges: data.edges.length,
-      n_clusters: 2,
+      n_clusters: 1,
+      n_with_authors: data.nodes.filter((n) => n.authors).length,
+      n_with_year: data.nodes.filter((n) => n.year).length,
+      n_with_summary: data.nodes.filter((n) => n.summary).length,
+      n_with_doi: data.nodes.filter((n) => n.doi).length,
     };
+    // Structural holes and clusters only make sense for the whole library.
+    const gapsToggle = document.getElementById("toggle-gaps");
+    if (gapsToggle && gapsToggle.closest(".toggle-row, .toggle-item, label, div"))
+      gapsToggle.closest(".toggle-row, .toggle-item, label, div").style.display = "none";
+    // Edge weights are rescaled to 0.3-1 by the server: show them all by default.
+    thresholdRaw = 0;
+    if (thresholdSlider) thresholdSlider.value = 0;
+    if (thresholdVal) thresholdVal.textContent = sliderToThreshold(0).toFixed(2);
 
     graphData = data;
 
@@ -203,8 +220,10 @@ async function loadNeighborGraph(neighborId) {
       renderGraph();
 
       // Run ForceAtlas2 for a few seconds to settle the layout
-      if (window.forceAtlas2) {
-        window.forceAtlas2.assign(graph, {
+      const lib = window.graphologyLibrary || {};
+      const fa2 = lib.layoutForceAtlas2 || window.forceAtlas2;
+      if (fa2) {
+        fa2.assign(graph, {
           iterations: 100,
           settings: {
             gravity: 0.1,
@@ -212,24 +231,21 @@ async function loadNeighborGraph(neighborId) {
             barnesHutOptimize: true,
           },
         });
-      } else if (window.graphology && window.graphology.layout) {
-        window.graphology.layout.circular.assign(graph);
+      } else if (lib.layout) {
+        lib.layout.circular.assign(graph);
       }
 
       updateStats();
-      setStatus(
-        `Focused on ${neighborId} — ${data.nodes.length} neighbors`,
-        "ready",
-      );
+      const shortTitle = (source.title || neighborId).slice(0, 60);
+      setStatus(`Neighbours of “${shortTitle}” — ${data.nodes.length - 1} papers`, "ready");
       hideLoading();
 
       // Zoom into source
       setTimeout(() => {
         if (renderer) {
           try {
-            renderer
-              .getCamera()
-              .animate({ x: 0, y: 0, ratio: 0.8 }, { duration: 1000 });
+            renderer.refresh();
+            renderer.getCamera().animatedReset({ duration: 800 });
           } catch (e) {}
         }
       }, 500);
@@ -385,6 +401,9 @@ function renderGraph() {
       minCameraRatio: 0.05,
       maxCameraRatio: 10,
       zIndex: true,
+      // The HTML tooltip below shows hovered papers; Sigma's own hover box
+      // drew white text on a white background.
+      hoverRenderer: () => {},
     });
   } catch (err) {
     console.error("Sigma construction failed:", err);
@@ -581,9 +600,23 @@ async function toggleCitations(on) {
   if (on && !citationData) {
     setStatus("Loading citations…", "building");
     try {
-      citationData = await apiFetch("/api/graph/citations");
+      let data = await apiFetch("/api/graph/citations");
+      let tries = 0;
+      while (data.status === "building" && tries < 120 && showCitations) {
+        setStatus(data.message || "Fetching citations…", "building");
+        await sleep(5000);
+        data = await apiFetch("/api/graph/citations");
+        tries++;
+      }
+      if (data.status === "building") {
+        setStatus("Citations still loading — toggle again later", "building");
+        document.getElementById("toggle-citations").checked = false;
+        showCitations = false;
+        return;
+      }
+      citationData = data;
       setStatus(
-        `Citations: ${citationData.edges.length} links loaded`,
+        `Citations: ${citationData.edges.length} links between your papers`,
         "ready",
       );
     } catch (err) {
@@ -597,17 +630,36 @@ async function toggleCitations(on) {
 }
 
 // ─── Structural Holes ──────────────────────────────────────────────────────
+function clusterName(id) {
+  const c = (graphData.clusters || []).find((x) => x.id === id);
+  return c && c.label ? c.label : `Cluster ${id}`;
+}
+
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (ch) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  })[ch]);
+}
+
 function buildGapsPanel() {
-  if (!graphData.gaps || graphData.gaps.length === 0) return;
-  gapsSection.style.display = "";
   gapsList.innerHTML = "";
+  if (!graphData.gaps || graphData.gaps.length === 0) {
+    gapsList.innerHTML =
+      '<div class="gap-desc">No structural holes: every pair of similar clusters is already well connected.</div>';
+    return;
+  }
+  const hint = document.createElement("div");
+  hint.className = "gap-desc";
+  hint.style.marginBottom = "0.5rem";
+  hint.textContent = "Similar topics with few links between them. Click one to isolate the two clusters.";
+  gapsList.appendChild(hint);
   for (const gap of graphData.gaps.slice(0, 10)) {
     const card = document.createElement("div");
     card.className = "gap-card";
     card.innerHTML = `
       <div class="gap-score">Gap score: ${gap.gap_score.toFixed(3)}</div>
       <div class="gap-desc">
-        Cluster ${gap.cluster_a} ↔ Cluster ${gap.cluster_b}<br>
+        <b>${escapeHtml(clusterName(gap.cluster_a))}</b> ↔ <b>${escapeHtml(clusterName(gap.cluster_b))}</b><br>
         Similarity: ${(gap.semantic_similarity * 100).toFixed(0)}% &bull;
         Inter-link density: ${(gap.inter_edge_density * 100).toFixed(2)}%
       </div>`;
@@ -640,7 +692,7 @@ function buildLegend() {
     item.className = "legend-item";
     item.innerHTML = `
       <span class="legend-dot" style="background:${c.color}"></span>
-      <span>Cluster ${c.id} <small>(${c.count})</small></span>`;
+      <span>${escapeHtml(c.label || "Cluster " + c.id)} <small>(${c.count})</small></span>`;
     item.addEventListener("click", () => {
       if (highlightedCluster === c.id) {
         highlightedCluster = null;
@@ -861,6 +913,13 @@ function wireControls() {
   document.getElementById("toggle-gaps").addEventListener("change", (e) => {
     showGaps = e.target.checked;
     gapsSection.style.display = showGaps ? "" : "none";
+    if (showGaps) {
+      gapsSection.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      const first = graphData && graphData.gaps && graphData.gaps[0];
+      if (first) highlightGap(first);
+    } else if (graph) {
+      renderGraph(); // restore every node hidden by a gap highlight
+    }
   });
 
   document.getElementById("toggle-labels").addEventListener("change", (e) => {

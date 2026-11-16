@@ -16,6 +16,22 @@ if (!CONFIG.AUTH_TOKEN) {
   if (CONFIG.AUTH_TOKEN) sessionStorage.setItem("auth_token", CONFIG.AUTH_TOKEN);
 }
 
+(() => {
+  // Remove the token from the address bar (history, screenshots) and honour
+  // ?redirect=/ui/... used by the graph page when it needs a login.
+  const params = new URLSearchParams(window.location.search);
+  const redirect = params.get("redirect");
+  if (CONFIG.AUTH_TOKEN && redirect && /^\/ui\/[\w./-]*$/.test(redirect)) {
+    window.location.replace(redirect);
+    return;
+  }
+  if (params.has("token")) {
+    params.delete("token");
+    const qs = params.toString();
+    window.history.replaceState({}, "", window.location.pathname + (qs ? "?" + qs : ""));
+  }
+})();
+
 const state = {
   activeProject: null, // currently selected project name
   activeFile: "draft", // 'draft' | 'bib'
@@ -307,38 +323,30 @@ function switchMobileView(view) {
 }
 
 function switchSidePanel(tab) {
-  [tabLibrary, tabMatches].forEach((t) => {
-    t.classList.remove("active");
-    t.setAttribute("aria-selected", "false");
+  const panels = {
+    library: [tabLibrary, libraryContainer, "mobile-btn-library"],
+    matches: [tabMatches, resultsContainer, "mobile-btn-matches"],
+    discover: [
+      document.getElementById("tab-discover"),
+      document.getElementById("discover-container"),
+      "mobile-btn-matches",
+    ],
+  };
+  Object.entries(panels).forEach(([name, [tabEl, container]]) => {
+    if (!tabEl || !container) return;
+    const active = name === tab;
+    tabEl.classList.toggle("active", active);
+    tabEl.setAttribute("aria-selected", active ? "true" : "false");
+    container.classList.toggle("active-content", active);
+    container.style.display = active ? "block" : "none";
   });
-  [libraryContainer, resultsContainer].forEach((c) => {
-    c.classList.remove("active-content");
-    c.style.display = "none";
-  });
-
-  if (tab === "library") {
-    tabLibrary.classList.add("active");
-    tabLibrary.setAttribute("aria-selected", "true");
-    libraryContainer.classList.add("active-content");
-    libraryContainer.style.display = "block";
-    if (state.isMobile) {
-      // Ensure mobile nav is synced
-      mobileNavItems.forEach((i) => i.classList.remove("active"));
-      const btnLib = document.getElementById("mobile-btn-library");
-      if (btnLib) btnLib.classList.add("active");
-    }
-  } else if (tab === "matches") {
-    tabMatches.classList.add("active");
-    tabMatches.setAttribute("aria-selected", "true");
-    resultsContainer.classList.add("active-content");
-    resultsContainer.style.display = "block";
-    if (state.isMobile) {
-      mobileNavItems.forEach((i) => i.classList.remove("active"));
-      const btnMatches = document.getElementById("mobile-btn-matches");
-      if (btnMatches) btnMatches.classList.add("active");
-    }
+  if (state.isMobile && panels[tab]) {
+    mobileNavItems.forEach((i) => i.classList.remove("active"));
+    const btn = document.getElementById(panels[tab][2]);
+    if (btn) btn.classList.add("active");
   }
 }
+window.switchSidePanel = switchSidePanel;
 
 // =============================================================================
 // PROJECT MANAGEMENT
@@ -539,6 +547,7 @@ function handleHighlight() {
   if (state.activeFile !== "draft") return;
   const selectedText = window.getSelection().toString().trim();
   if (selectedText.length > 10) {
+    state.lastSelection = selectedText;
     // Prevent searching for the exact same text constantly
     if (state.lastSearchedText === selectedText) return;
 
@@ -799,6 +808,7 @@ function renderLibrary(papers, limit = 50) {
                     <button class="view-btn" style="background: var(--accent-color); color: white;" onclick="openQuickGraph('${p.hash_id}')">Quick Graph</button>
                     ${fileButtons}
                     <button class="view-btn" onclick="openRawText('${p.hash_id}', '${title.replace(/'/g, "\\'")}')">Text</button>
+                    <button class="view-btn" onclick="discoverRelated('${p.hash_id}')" title="Find related papers online">Related</button>
                     <button class="view-btn" id="bib-btn-lib-${p.hash_id}" onclick="addToBib('${p.hash_id}')" style="background: #3b82f6">Cite</button>
                 </div>
             </div>
@@ -890,6 +900,7 @@ function renderResults(results) {
                     <button class="view-btn" style="background: var(--accent-color); color: white;" onclick="openQuickGraph('${res.hash_id}')">Quick Graph</button>
                     ${fileButtons}
                     <button class="view-btn" onclick="openRawText('${res.hash_id}', '${title.replace(/'/g, "\\'")}')">Text</button>
+                    <button class="view-btn" onclick="discoverRelated('${res.hash_id}')" title="Find related papers online">Related</button>
                     <button class="view-btn" id="bib-btn-${res.hash_id}" onclick="addToBib('${res.hash_id}')" style="background: #3b82f6">Cite</button>
                 </div>
             </div>
@@ -1135,6 +1146,10 @@ function renderGraph(data) {
 }
 
 document.addEventListener("DOMContentLoaded", init);
+
+window.CONFIG = CONFIG;
+window.appState = state;
+window.reloadLibrary = loadLibrary;
 
 // =============================================================================
 // UTILS

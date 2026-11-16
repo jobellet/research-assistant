@@ -1,3 +1,4 @@
+import html
 import json
 import logging
 import re
@@ -120,10 +121,11 @@ def map_to_metadata(item: dict) -> dict:
         logger.warning(f"Failed to extract year: {e}")
 
     return {
-        "title": item.get("title", ["Unknown"])[0],
+        "title": html.unescape((item.get("title") or ["Unknown"])[0]),
         "authors": [f"{a.get('given', '')} {a.get('family', '')}".strip() for a in item.get("author", [])],
         "year": year,
         "doi": item.get("DOI"),
+        "journal": html.unescape((item.get("container-title") or [""])[0]),
         "keywords": item.get("subject", []),
         "summary": abstract[:500] + "..." if len(abstract) > 500 else abstract,
         "references": references,
@@ -157,6 +159,56 @@ def fast_metadata_extract(text: str) -> dict:
                 return map_to_metadata(item)
                 
     return None
+
+def abstract_from_text(text: str, max_chars: int = 500) -> str:
+    """Pull the abstract out of a paper's text (used when databases have none)."""
+    if not text:
+        return ""
+    m = re.search(r"(?:^|\n)\s*(?:A\s?B\s?S\s?T\s?R\s?A\s?C\s?T|Abstract|Summary)\s*[:.\-—]?\s*\n?", text[:15000])
+    if not m:
+        return ""
+    body = text[m.end():m.end() + 4000]
+    # stop at the first numbered section / Introduction / Keywords heading
+    stop = re.search(r"\n\s*(?:1\.?\s+[A-Z]|I\.\s+[A-Z]|Introduction\b|Keywords?\b|Key words\b)", body)
+    if stop:
+        body = body[:stop.start()]
+    body = " ".join(body.split())
+    if len(body) < 80:
+        return ""
+    return body[:max_chars] + "..." if len(body) > max_chars else body
+
+def arxiv_metadata_extract(text: str, filename: str = "") -> dict:
+    """Verified metadata for arXiv preprints (arXiv id from the filename or first page)."""
+    try:
+        from discovery_module.sources import arxiv_lookup, find_arxiv_id
+    except Exception:  # pragma: no cover - module missing
+        return None
+    arxiv_id = find_arxiv_id(text, filename)
+    if not arxiv_id:
+        return None
+    cand = arxiv_lookup(arxiv_id)
+    if not cand:
+        return None
+    # Sanity check: most title words must appear at the start of the PDF
+    words = [w for w in re.sub(r"[^\w\s]", "", cand["title"].lower()).split() if len(w) > 3]
+    head = (text or "")[:10000].lower()
+    if text and words and sum(w in head for w in words) / len(words) < 0.6:
+        logger.info(f"arXiv id {arxiv_id} found but title does not match the PDF; ignoring.")
+        return None
+    abstract = cand.get("abstract", "")
+    logger.info(f"Verified paper via arXiv: {arxiv_id}")
+    return {
+        "title": cand["title"],
+        "authors": cand["authors"],
+        "year": cand["year"],
+        "doi": cand.get("doi") or f"10.48550/arXiv.{arxiv_id}",
+        "journal": "arXiv",
+        "arxiv_id": arxiv_id,
+        "keywords": [],
+        "summary": abstract[:500] + "..." if len(abstract) > 500 else abstract,
+        "references": [],
+        "source": "arXiv (Verified)",
+    }
 
 def get_doi_metadata(doi: str) -> dict:
     """

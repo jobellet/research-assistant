@@ -9,7 +9,17 @@ class BowSearcher:
     def __init__(self, index_path=None):
         self.index_path = Path(index_path) if index_path else BOW_INDEX_PATH
         self.index = {}
+        self._mtime = None
         self.load_index()
+
+    def _reload_if_changed(self):
+        """Pick up an index rebuilt by the background processor."""
+        try:
+            mtime = self.index_path.stat().st_mtime
+        except OSError:
+            return
+        if mtime != self._mtime:
+            self.load_index()
 
     def load_index(self):
         if not self.index_path.exists():
@@ -18,6 +28,7 @@ class BowSearcher:
         try:
             with open(self.index_path, "r", encoding="utf-8") as f:
                 self.index = json.load(f)
+            self._mtime = self.index_path.stat().st_mtime
             logger.info(f"Loaded BOW index with {len(self.index)} terms.")
         except Exception as e:
             logger.error(f"Failed to load BOW index: {e}")
@@ -27,6 +38,7 @@ class BowSearcher:
         Search for papers based on relative frequency of terms.
         Supports single or multiple terms.
         """
+        self._reload_if_changed()
         if not self.index:
             return []
 

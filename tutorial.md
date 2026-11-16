@@ -1,265 +1,329 @@
-# My AI Research Assistant — User Tutorial
+# Research Assistant — Tutorial
 
-A step-by-step guide to setting up and using the full research pipeline.
+This tutorial walks through every feature using a real example: a library of
+**39 papers on correlates of consciousness in artificial intelligence**, which
+we then use to write a short **literature review in LaTeX**
+([PDF](docs/examples/ai-consciousness-review/review.pdf) ·
+[LaTeX](docs/examples/ai-consciousness-review/review.tex) ·
+[BibTeX](docs/examples/ai-consciousness-review/references.bib)).
 
----
-
-## Table of Contents
-
-1. [Setup & Installation](#1-setup--installation)
-2. [Starting the Server](#2-starting-the-server)
-3. [Backend Monitor Dashboard](#3-backend-monitor-dashboard)
-4. [Adding Papers to Your Library](#4-adding-papers-to-your-library)
-5. [Running AI Processing Tasks](#5-running-ai-processing-tasks)
-6. [Writing Your Manuscript (LaTeX Editor)](#6-writing-your-manuscript-latex-editor)
-7. [Semantic Search While Writing](#7-semantic-search-while-writing)
-8. [Knowledge Graph (Citation Network)](#8-knowledge-graph-citation-network)
-9. [Adding Citations to Your .bib File](#9-adding-citations-to-your-bib-file)
-10. [Multi-Computer Sync via Git](#10-multi-computer-sync-via-git)
+All screenshots and animations were captured from the running application.
 
 ---
 
-## 1. Setup & Installation
+## Contents
 
-### Create and activate the shared Conda environment
+1. [Install](#1-install)
+2. [Start the server and log in](#2-start-the-server-and-log-in)
+3. [Build your library](#3-build-your-library)
+4. [The writing interface](#4-the-writing-interface)
+5. [Highlight → search → cite](#5-highlight--search--cite)
+6. [Searching the library](#6-searching-the-library)
+7. [Discover new papers online](#7-discover-new-papers-online)
+8. [Quick Graph: a paper's neighbourhood](#8-quick-graph-a-papers-neighbourhood)
+9. [Knowledge Graph explorer](#9-knowledge-graph-explorer)
+10. [Worked example: a literature review](#10-worked-example-a-literature-review)
+11. [Manuscript and grant quality checks](#11-manuscript-and-grant-quality-checks)
+12. [Statistics page and mobile use](#12-statistics-page-and-mobile-use)
+13. [Command-line reference and troubleshooting](#13-command-line-reference-and-troubleshooting)
+
+---
+
+## 1. Install
 
 ```bash
-# Clone the repository
-git clone <your-repo-url>
-cd my-ai-research-assistant
-
-# Create the environment from the shared spec
+git clone https://github.com/jobellet/research-assistant.git
+cd research-assistant
 conda env create -f environment.yml
-
-# Activate it
 conda activate ai_research_assistant
 ```
 
-> [!IMPORTANT]
-> All collaborating computers and AI agents must use the **same `environment.yml`**. If you install a new package, always run `conda env update -f environment.yml --prune` and commit the updated `environment.yml`.
+Optional settings go in a `.env` file at the repository root (it is
+git-ignored, so keys never end up in the repository):
 
-### Install and start Ollama
+| Variable | Purpose |
+|---|---|
+| `SERVER_PASSWORD` | Password for the web interface. If unset, a random token is printed at start-up. |
+| `HF_TOKEN` | Hugging Face token, needed once to download `google/embeddinggemma-300m`. |
+| `S2_API_KEY` | Optional [Semantic Scholar key](https://www.semanticscholar.org/product/api): higher rate limits for Discover and citation links. |
+| `OPENALEX_API_KEY` | Optional OpenAlex key (higher rate limits). |
+| `DATA_DIR` | Store `library/`, `inbox/` and `chroma_db/` elsewhere (e.g. a synced drive). |
+| `PORT` | Server port (default `8000`). |
 
-The extraction module uses [Ollama](https://ollama.ai) for local LLM inference.
+## 2. Start the server and log in
 
 ```bash
-# Download and install from https://ollama.ai
-# Then pull a lightweight model (recommended):
-ollama pull phi3
+python -m server_module.main
 ```
 
----
+Open **http://localhost:8000/ui/** and enter your `SERVER_PASSWORD` (or open
+`http://localhost:8000/ui/?token=<password>` once; the token is then removed
+from the address bar and remembered for the browser tab). On macOS you can
+double-click `launch.command` instead.
 
-## 2. Starting the Server
+| Address | Page |
+|---|---|
+| `/ui/` | Writing interface (editor, library, matches, discover) |
+| `/ui/graph.html` | Knowledge Graph explorer |
+| `/dashboard` | Backend Monitor (processing pipeline) |
+| `/ui/stats.html` | Library statistics |
+| `/docs` | Interactive API documentation (FastAPI) |
 
-Run the server from the **root of the repository** (important for correct path resolution):
+## 3. Build your library
+
+There are four ways to add papers. All of them end in `inbox/`, which the
+processing pipeline turns into indexed library entries.
+
+1. **Drop PDFs into `inbox/`.**
+2. **Import Zotero:** `python scripts/import_zotero.py` (auto-detects `~/Zotero/storage`).
+3. **Google Drive:** `python scripts/gdrive_sync.py <folder_id>`.
+4. **Discover tab / `python -m discovery_module`:** search arXiv, OpenAlex and
+   Semantic Scholar and download open-access PDFs directly (Section 7).
+
+To reproduce this tutorial's library (38 arXiv papers + 1 open-access article):
 
 ```bash
-cd my-ai-research-assistant
-python -m uvicorn server_module.main:app --host 0.0.0.0 --port 8000 --reload
+python scripts/fetch_demo_library.py
 ```
 
-On startup the server will automatically:
-- **Acquire a lock file** (`server.lock`) to prevent two instances from running simultaneously on the same machine.
+Then open the **Backend Monitor** (`/dashboard`) and click **Run Process**:
 
-The two main interfaces are then available:
-| URL | Purpose |
+![Backend Monitor](docs/tutorial/01_dashboard.png)
+
+For each PDF the pipeline:
+
+1. hashes it (SHA-256) and moves it to `library/<hash>/` — the same file is never processed twice;
+2. extracts the full text and **verified metadata**: arXiv preprints are identified from the
+   arXiv id (file name or first page); other papers through Crossref (DOI or title search,
+   cross-checked against the PDF text). If no abstract is available, it is taken from the PDF;
+3. rebuilds the **word-frequency index** and per-paper **TF-IDF keywords**;
+4. computes **semantic embeddings** (ChromaDB);
+5. refreshes the **knowledge graph** in the background.
+
+The table shows each paper's status and any missing metadata fields. The
+toggles on the left enable or disable individual steps (e.g. skip embeddings
+on a slow laptop and compute them on another machine).
+
+## 4. The writing interface
+
+![Editor](docs/tutorial/02_editor.png)
+
+- **Projects** (left): each project is a folder `projects/<name>/` with a
+  `draft.tex` and a `references.bib`. Use **+** to create one; the `default`
+  project cannot be deleted.
+- **Editor** (centre): plain-text LaTeX editor with auto-save ("Saved" next to
+  the file name). It does not compile LaTeX: compile with your usual tool
+  (`latexmk`, Overleaf, `tectonic`, …).
+- **Side panel** (right): **Library** (all papers, search and filters),
+  **Matches** (papers matching highlighted text) and **Discover** (online search).
+- **Knowledge Graph** (top right) switches the centre panel to a graph of the library.
+
+## 5. Highlight → search → cite
+
+Write a sentence, **highlight it**, and the papers of your library that support
+it appear in **Matches** (semantic search on the meaning of the sentence, not
+on its words). **Cite** adds the paper to the project's `references.bib`; the
+button then shows the `\cite{key}` command (click to copy it).
+
+![Writing, searching and citing](docs/tutorial/03_write_search_cite.gif)
+
+| Matches for the highlighted sentence | After clicking **Cite** | The generated `references.bib` |
+|---|---|---|
+| ![](docs/tutorial/04_matches.png) | ![](docs/tutorial/05_cite.png) | ![](docs/tutorial/06_bibtex.png) |
+
+Citation keys look like `gurnee2026verbalizable` (first author, year, first
+title word). Entries contain authors (joined with `and`), year, DOI, journal or
+arXiv eprint fields. Citing the same paper twice returns the existing key
+instead of duplicating the entry; two different papers by the same author in
+the same year get `a`, `b`… suffixes.
+
+## 6. Searching the library
+
+The **Library** tab has three search modes:
+
+| Mode | What it does | Example |
+|---|---|---|
+| **Filter** | Instant filtering by title/author text, year, author and journal | author = `Shanahan` |
+| **Semantic** | Embedding search: finds papers about the same idea in different words | `language models introspection about their own internal states` |
+| **Word Frequency** | Ranks papers by how often your words occur in their full text | `workspace` |
+
+| Semantic search | Word frequency | Filter by author |
+|---|---|---|
+| ![](docs/tutorial/07_library_semantic.png) | ![](docs/tutorial/08_library_wordfreq.png) | ![](docs/tutorial/09_library_filter_author.png) |
+
+The modes complement each other. In the demo library, the semantic query
+"integrated information theory causal structure" does not return the IIT 4.0
+paper (its abstract is phrased differently), while the word-frequency query
+`phi integrated` ranks it first.
+
+Every card has buttons to open the **PDF**, the extracted **Text**, a
+**Quick Graph** (Section 8), **Related** papers online (Section 7) and **Cite**.
+Double-click a card to open its text.
+
+| Text viewer | PDF viewer |
 |---|---|
-| `http://localhost:8000/dashboard` | Backend Monitor (admin view) |
-| `http://localhost:8000/ui/` | LaTeX Editor (writing view) |
+| ![](docs/tutorial/10_text_viewer.png) | ![](docs/tutorial/11_pdf_viewer.png) |
 
----
+## 7. Discover new papers online
 
-## 3. Backend Monitor Dashboard
+The **Discover** tab searches outside your library: **arXiv**, **OpenAlex**,
+**Semantic Scholar** and optionally **Crossref**, in parallel. Results are
+merged (the same paper found in several databases appears once, with one
+badge per source), ranked, and marked **✓ in library** when you already have
+them. **Add to library** downloads the open-access PDF into `inbox/` and starts
+the pipeline, so the paper appears in the Library a minute later.
 
-Navigate to `http://localhost:8000/dashboard` to open the management dashboard.
+![Discover: online search](docs/tutorial/19_discover_search.png)
 
-![Backend Monitor Dashboard](https://raw.githubusercontent.com/jobellet/my-ai-research-assistant/main/docs/backend_monitor.png)
+Two other entry points:
 
-> *The Backend Monitor shows all ingested papers, their processing status, and missing metadata fields. The left sidebar controls which AI tasks the background processor will perform.*
+- **Related** (button on any library card) combines Semantic Scholar
+  recommendations, papers citing the seed paper, OpenAlex related works and an
+  arXiv search built from the paper's title and keywords.
+- **From highlighted text** extracts the most distinctive terms of the
+  sentence you highlighted in the editor and searches for literature on them.
 
-### Dashboard Layout
-
-| Area | Description |
+| Related to Butlin et al. (2023) | From the highlighted sentence |
 |---|---|
-| **Left sidebar — Processing Toggles** | Enable/disable individual AI tasks (e.g. skip embedding computation on a slow laptop). |
-| **"Run Process" button** | Starts the background processing loop using only the enabled toggles. Turns red when active. |
-| **"Sync Repo" button** | Manually triggers a `git pull --rebase` without restarting the server. |
-| **Status badge** | Shows whether the processor is **Idle** or **Running** (green pulsing dot). |
-| **Library table** | One row per paper: Filename, Status, Title/Authors, Missing Fields. |
+| ![](docs/tutorial/20_discover_related.png) | ![](docs/tutorial/21_discover_text.png) |
 
----
+The same tools are available on the command line:
 
-## 4. Adding Papers to Your Library
-
-The system uses a **zero-redundancy inbox** design. Simply drop any PDF into the `inbox/` folder:
-
-```
-my-ai-research-assistant/
-└── inbox/
-    └── my_paper.pdf   ← drop here
-```
-
-The `ingest_module` will:
-1. Compute a **SHA-256 hash** of the file.
-2. Create a unique folder: `library/<hash>/`.
-3. Move the PDF there.
-
-This guarantees the same paper can never be processed twice, even if you drop it again.
-
-> [!TIP]
-> You can drop multiple PDFs at once. The monitor watches the folder in real-time using `watchdog` and processes them sequentially.
-
----
-
-## 5. Running AI Processing Tasks
-
-From the **Backend Monitor**, use the sidebar toggles to choose which tasks to run, then click **Run Process**.
-
-| Toggle | What it does |
-|---|---|
-| **Process New PDFs** | Moves files from `inbox/` → `library/<hash>/` |
-| **Add DOI** | Asks the LLM to find/extract the DOI from the PDF text |
-| **Add Authors** | Extracts the author list via the local LLM (Ollama) |
-| **Add Title** | Extracts the paper title |
-| **Find Keywords** | Generates a set of 3–5 representative keywords |
-| **Compute Embeddings** | Encodes the paper summary with SentenceTransformers and stores it in ChromaDB |
-
-> [!NOTE]
-> You can run different tasks on different computers. For example: a powerful desktop can do **Compute Embeddings** while a laptop only does **Add Title / Add Authors**. The results are merged automatically via Git sync.
-
-All extracted metadata is saved as `library/<hash>/metadata.json`. The Library table updates automatically every 5 seconds.
-
----
-
-## 6. Writing Your Manuscript (LaTeX Editor)
-
-Navigate to `http://localhost:8000/ui/` to open the research writing environment.
-
-![LaTeX Editor UI](https://raw.githubusercontent.com/jobellet/my-ai-research-assistant/main/docs/research_ui.png)
-
-> *The LaTeX Editor gives you a split-pane writing environment. Your draft auto-saves to local storage. Highlighting any text triggers a live semantic search of your library in the right panel.*
-
-### Interface Layout
-
-| Area | Description |
-|---|---|
-| **Left sidebar** | File navigator showing `draft.tex` and `references.bib` |
-| **Centre — Editor** | Monaco-style LaTeX writing area with monospace font |
-| **"Saved" indicator** | Auto-saves to browser local storage as you type |
-| **"Editor / Knowledge Graph" tabs** | Switch between writing mode and the citation graph view |
-| **Right panel — Semantic Matches** | Shows papers from your library that match the highlighted text |
-| **Login button** | Enter your `x-auth-token` (your `SERVER_PASSWORD`; if unset, a random token is printed at server startup) to enable API calls |
-
----
-
-## 7. Semantic Search While Writing
-
-This is the core feature: **highlight any claim or sentence** in your draft, and the system automatically searches your entire paper library for relevant references.
-
-**How it works:**
-1. Type your LaTeX manuscript in the editor.
-2. Select/highlight any sentence or phrase (minimum 10 characters).
-3. After a 500ms debounce, the selected text is sent to `/api/search`.
-4. Results appear in the **Semantic Matches** panel ranked by relevance score.
-
-Each result card shows:
-- **Paper title and authors**
-- **AI-generated summary**
-- **Relevance score** (% match)
-- **"View PDF"** button to open the source document in a modal viewer
-- **"Add Citation"** button to append the reference to `references.bib`
-
-> [!TIP]
-> The search uses **cosine similarity** in ChromaDB's embedding space — it finds conceptually related papers even when they use different terminology.
-
----
-
-## 8. Advanced Knowledge Graph Explorer
-
-Click the **"Knowledge Graph"** button in the main header of the LaTeX editor to open the dedicated graph explorer (at `/ui/graph.html`).
-
-This is a high-performance WebGL-based visualization (Sigma.js) that maps your entire library based on semantic similarity.
-
-### Key Features:
-- **Semantic Mapping (UMAP)**: Papers are positioned based on their high-dimensional semantic proximity. Closely related papers form visible clusters.
-- **Dynamic Focus Mode**: Select one or more papers (**Shift+Click**), then click **"Set as Focus"**. The graph will re-calculate distances relative to the mean embedding of your selection, helping you explore specific sub-fields.
-- **Citation Layer**: Toggle **"Show Citations"** to overlay real-world citation links fetched from the Semantic Scholar API.
-- **Structural Hole Detection**: Toggle **"Highlight Gaps"** to see "Structural Holes" — areas where two clusters are semantically similar but lack citation bridges. These represent high-potential research opportunities.
-- **Interactive Sidebar**: Click any paper to view its metadata, AI summary, and local PDF.
-
----
-
-## 9. Adding Citations to Your .bib File
-
-From any search result card, click **"Add Citation"**. The system will:
-
-1. Look up the paper's metadata in ChromaDB by its hash ID.
-2. Generate a BibTeX citation key (e.g. `Smith2023MachineLearning`).
-3. Safely append a `@article{...}` entry to `references.bib` using `bibtexparser` — without breaking existing entries.
-
-You can verify the result by clicking `references.bib` in the file sidebar.
-
-> [!CAUTION]
-> Do not manually edit `references.bib` while the server is running an "Add Citation" task, to avoid write conflicts.
-
----
-
-## 10. Multi-Computer Sync via Git
-
-This system is designed to run across multiple synced computers (e.g. a home desktop + a lab workstation).
-
-### Automatic Sync
-The server performs `git pull --rebase` **automatically on startup**. This means:
-- Starting the server on any machine will immediately pull the latest `library/` metadata and `references.bib` committed by other computers.
-
-### Manual Sync
-At any time, click the **"Sync Repo"** button in the Backend Monitor, or run from the terminal:
 ```bash
-git pull --rebase
+python -m discovery_module search "global workspace theory language agents"
+python -m discovery_module related 2308.08708            # library hash, arXiv id or DOI
+python -m discovery_module text "LLMs report subjective experience under self-reference"
+python -m discovery_module fetch 2607.15495 2610.01002    # download into inbox/
+python -m discovery_module search "attention schema" --fetch-top 3 --json
 ```
 
-### Recommended Workflow for Distributed Processing
-```
-Computer A (Fast GPU desktop)
-  └── Toggles ON: Compute Embeddings
-  └── Toggles OFF: Everything else
+Public APIs limit request rates. Discover retries with back-off and reports how
+many hits each source returned (e.g. `S2: 0` means Semantic Scholar was
+rate-limited); set `S2_API_KEY` for reliable Semantic Scholar results.
 
-Computer B (MacBook)
-  └── Toggles ON: Add Title, Add Authors, Add DOI
-  └── Toggles OFF: Compute Embeddings
+## 8. Quick Graph: a paper's neighbourhood
 
-Computer C (Lab server)
-  └── Toggles ON: Process New PDFs
-  └── Toggles OFF: Everything else
-```
+**Quick Graph** opens the papers whose full text is most similar to the
+selected one (word-frequency similarity). The selected paper is the large
+orange node; each paper is linked to its five closest neighbours. Click a
+node for details; drag to pan, scroll to zoom.
 
-After each run, commit the results:
+![Quick Graph](docs/tutorial/12_quick_graph.png)
+
+## 9. Knowledge Graph explorer
+
+**Knowledge Graph → Advanced Explorer** (or `/ui/graph.html`) maps the whole
+library: papers are placed by semantic similarity (UMAP), coloured by cluster
+(HDBSCAN), and linked to their nearest neighbours.
+
+![Knowledge Graph explorer](docs/tutorial/14_knowledge_graph.gif)
+
+- **Clusters** (left panel) are named after the words most specific to them,
+  here *models · llms · introspection*, *moral · agency*,
+  *workspace · global · artificial* and *theory · conscious*. Click a cluster
+  to highlight it.
+- **Click a paper** to see its metadata, abstract, keywords, its most similar
+  papers, **Open PDF** and **Add to Bibliography**.
+- **Search** hides every paper whose title does not match.
+- **Min. similarity** hides weaker links.
+- **Show citations** overlays real citation links between your papers (orange),
+  fetched from Semantic Scholar in the background the first time (about one
+  second per paper).
+- **Highlight gaps** lists *structural holes*: pairs of clusters that are
+  semantically close but sparsely connected, i.e. literatures that could talk
+  to each other more. Click a gap to isolate the two clusters; untick to restore.
+- **Focus mode**: Shift-click several papers and **Set as Focus** to resize every
+  paper by its similarity to their mean embedding.
+- **Rebuild Graph** recomputes the layout (it is rebuilt automatically after new papers).
+
+| Paper details | Citation links | Structural holes | Focus on 3 papers |
+|---|---|---|---|
+| ![](docs/tutorial/15_graph_detail.png) | ![](docs/tutorial/16_graph_citations.png) | ![](docs/tutorial/17_graph_gaps.png) | ![](docs/tutorial/18_graph_focus.png) |
+
+The editor's own **Knowledge Graph** tab shows a lighter force-directed view
+of the same graph:
+
+![Graph tab in the editor](docs/tutorial/13_graph_tab.png)
+
+## 10. Worked example: a literature review
+
+The review in [`docs/examples/ai-consciousness-review/`](docs/examples/ai-consciousness-review/)
+was produced with the tools above:
+
+1. **Seed papers.** Four PDFs on AI consciousness were dropped into `inbox/`.
+2. **Expand the corpus.** 31 well-known arXiv papers on the topic were added
+   by arXiv identifier (the same as `python -m discovery_module fetch <ids>`), and
+   **Related** on Butlin et al. (2023) plus a Discover search on "global
+   workspace theory language agents" found four recent papers
+   (`python -m discovery_module related 2308.08708`), bringing the library to
+   39 papers (list in `scripts/fetch_demo_library.py`).
+3. **Map the field.** The Knowledge Graph's clusters (*models · llms ·
+   introspection*, *moral · agency*, *workspace · global*, *theory ·
+   conscious*) are close to the review's main sections, and its structural
+   holes point to literatures that rarely cite each other — material for the
+   synthesis section.
+4. **Collect evidence per section** with semantic searches such as
+   *"theory-derived indicator properties for assessing consciousness in AI
+   systems"* or *"self-reports of subjective experience by language models"*,
+   and word-frequency searches (`workspace`, `introspection`, `phi integrated`).
+   The **Text** viewer was used to check each claim against the paper.
+5. **Cite while writing**: every reference was added with **Cite**, which wrote
+   the [`references.bib`](docs/examples/ai-consciousness-review/references.bib).
+6. **Compile** with any LaTeX tool, e.g. `tectonic review.tex`.
+
+## 11. Manuscript and grant quality checks
+
+The **grounded claim audit** compares each sentence of a draft with the
+analysis/results text you supply, flags absolute or unsupported statements and
+numerical contradictions, and shows the best evidence sentence for each claim
+(`POST /api/audit/claims`, or `audit_module.audit_claims`). It runs locally and
+never invents evidence.
+
+![Claim audit](docs/tutorial/24_claim_audit.gif)
+
+Other checks (all local, command line):
+
 ```bash
-git add library/ references.bib
-git commit -m "chore: processed N new papers"
-git push
+python -m audit_module.prose_auditor draft.txt      # connectives, voice, rhythm, spelling consistency
+python -m audit_module.number_auditor draft.txt --horizon 36   # quantities, sums, ranges, timeline
+python -m toolkit_module.schedule_generator         # DFG-style work schedule (Gantt) PNG
+python -m toolkit_module.pdf_comments review.pdf    # extract reviewer comments from a PDF
+python -m toolkit_module.figure_fit figure.png      # how much page a figure will take
 ```
 
-### Offloading Graph Generation (Speed Up)
-The Knowledge Graph requires heavy computation (UMAP) and many API calls (Semantic Scholar). If your main machine is slow, you can run the generation on a more powerful machine:
- 
-1. **On the powerful machine**:
-   ```bash
-   python scripts/build_graph.py
-   ```
-2. **Commit the results**:
-   ```bash
-   git add library/graph_cache.json library/citation_graph.json
-   git commit -m "chore: pre-computed knowledge graph"
-   git push
-   ```
-3. **On your laptop**:
-   The server will detect these files on startup (or after a "Sync Repo") and load them instantly instead of rebuilding them.
- 
-> [!NOTE]
-> The **lock file** (`server.lock`) only prevents two instances on the **same machine**. Multiple computers on the network can each run their own instance safely, as long as they work on non-overlapping tasks and sync via Git regularly.
+## 12. Statistics page and mobile use
 
----
+`/ui/stats.html` summarises processing progress (papers, metadata, text, DOIs).
+On a phone, the interface switches to a bottom navigation bar (Editor,
+Matches, Library, Graph).
 
-*Tutorial generated for My AI Research Assistant v0.1 — 2026-04-22*
+| Statistics | Mobile |
+|---|---|
+| ![](docs/tutorial/22_stats.png) | ![](docs/tutorial/23_mobile.png) |
+
+## 13. Command-line reference and troubleshooting
+
+| Command | Purpose |
+|---|---|
+| `python -m server_module.main` | Start the server (`PORT`, `SERVER_PASSWORD` from the environment or `.env`). |
+| `python scripts/fetch_demo_library.py` | Download this tutorial's 39 papers into `inbox/`. |
+| `python -m discovery_module …` | Online literature search / related papers / downloads (Section 7). |
+| `python scripts/generate_bow.py [--update-db]` | Rebuild the word-frequency index and TF-IDF keywords (done automatically by the pipeline). |
+| `python scripts/build_graph.py` | Pre-compute the knowledge graph and citation links (e.g. on a faster machine). |
+| `python scripts/search_bow.py "keyword"` | Word-frequency search without starting the server. |
+| `python run_search.py` | Desktop (Tkinter) search window. |
+| `python -m pytest` | Run the test suite. |
+
+**Troubleshooting**
+
+- *"Error loading library"*: the password was wrong or the prompt was
+  dismissed — reload the page, or open `/ui/?token=<password>`.
+- *Word Frequency search or Quick Graph is empty*: the word index is built
+  after processing; for libraries imported by other means run
+  `python scripts/generate_bow.py`.
+- *Knowledge graph shows "No papers in library yet"*: run the pipeline first;
+  the graph is rebuilt automatically when it finishes (or click **Rebuild Graph**).
+- *Discover returns few results / `S2: 0`*: a public API is rate-limiting you;
+  wait a minute or add `S2_API_KEY` / `OPENALEX_API_KEY` to `.env`.
+- *"Another instance running?"*: a previous server is still running (or left
+  `server.lock` behind after a crash); stop it or delete `server.lock`.

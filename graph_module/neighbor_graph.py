@@ -39,11 +39,21 @@ def build_neighbor_graph_bow(hash_id, bow_searcher, db_manager, top_n=50):
         res = db_manager.collection.get(ids=[h], include=["metadatas"])
         meta = res["metadatas"][0] if res and res["metadatas"] else {"title": "Unknown"}
         
+        file_meta = {}
+        meta_path = LIBRARY_DIR / h / "metadata.json"
+        if meta_path.exists():
+            try:
+                file_meta = json.loads(meta_path.read_text())
+            except Exception:
+                file_meta = {}
         nodes.append({
             "id": h,
             "title": meta.get("title", "Unknown"),
             "authors": meta.get("authors", ""),
             "year": meta.get("year", ""),
+            "doi": meta.get("doi", ""),
+            "summary": file_meta.get("summary", ""),
+            "pdf_filename": meta.get("pdf_filename", ""),
             "is_source": (h == hash_id)
         })
         
@@ -80,8 +90,34 @@ def build_neighbor_graph_bow(hash_id, bow_searcher, db_manager, top_n=50):
                         "weight": round(float(similarity), 4)
                     })
 
+    edges = sparsify_edges(edges, k=5)
     return {
         "nodes": nodes,
         "edges": edges,
         "source_id": hash_id
     }
+
+
+def sparsify_edges(edges, k=5):
+    """Keep each paper's k strongest links and rescale weights to [0.3, 1].
+
+    Word-overlap cosine similarities are small (median ~0.25), so with the
+    graph page's default similarity threshold almost every edge was hidden and
+    the layout fell apart. The raw value is kept in ``similarity``.
+    """
+    if not edges:
+        return edges
+    by_node = {}
+    for i, e in enumerate(edges):
+        by_node.setdefault(e["source"], []).append(i)
+        by_node.setdefault(e["target"], []).append(i)
+    keep = set()
+    for idxs in by_node.values():
+        keep.update(sorted(idxs, key=lambda i: edges[i]["weight"], reverse=True)[:k])
+    kept = [dict(edges[i]) for i in sorted(keep)]
+    lo = min(e["weight"] for e in kept)
+    hi = max(e["weight"] for e in kept)
+    for e in kept:
+        e["similarity"] = e["weight"]
+        e["weight"] = round(0.3 + 0.7 * ((e["weight"] - lo) / (hi - lo) if hi > lo else 1.0), 4)
+    return kept

@@ -8,7 +8,7 @@
       name="description"
       content="AI-powered LaTeX editor with semantic search and citation management across multiple projects."
     />
-    <link rel="stylesheet" href="style.css?v=3" />
+    <link rel="stylesheet" href="style.css?v=4" />
     <!-- Load D3.js for Knowledge Graph -->
     <script src="https://d3js.org/d3.v7.min.js"></script>
   </head>
@@ -264,6 +264,16 @@
           >
             Matches
           </button>
+          <button
+            id="tab-discover"
+            class="panel-tab"
+            role="tab"
+            aria-controls="discover-container"
+            aria-selected="false"
+            title="Search arXiv, OpenAlex, Semantic Scholar and Crossref"
+          >
+            Discover
+          </button>
         </div>
 
         <div
@@ -456,6 +466,41 @@
           </div>
         </div>
 
+        <div
+          id="discover-container"
+          class="panel-content"
+          style="display: none"
+          role="tabpanel"
+          aria-labelledby="tab-discover"
+        >
+          <div class="discover-controls">
+            <input
+              type="text"
+              id="discover-input"
+              aria-label="Search the literature online"
+              placeholder="Search arXiv, OpenAlex, Semantic Scholar…"
+            />
+            <div class="discover-sources" role="group" aria-label="Databases">
+              <label><input type="checkbox" value="arxiv" checked /> arXiv</label>
+              <label><input type="checkbox" value="openalex" checked /> OpenAlex</label>
+              <label><input type="checkbox" value="semantic_scholar" checked /> S2</label>
+              <label><input type="checkbox" value="crossref" /> Crossref</label>
+            </div>
+            <div class="discover-buttons">
+              <button id="btn-discover-search" class="view-btn active">Search online</button>
+              <button id="btn-discover-selection" class="view-btn" title="Find literature for the text highlighted in the editor">From highlighted text</button>
+            </div>
+            <div id="discover-status" class="discover-status" role="status" aria-live="polite"></div>
+          </div>
+          <div id="discover-results">
+            <div class="empty-state" style="text-align: center; padding: 2rem 1rem">
+              <div style="font-size: 2rem; margin-bottom: 1rem" aria-hidden="true">🌐</div>
+              <div class="text-secondary" style="margin-bottom: 0.5rem; font-weight: 500">Find new papers</div>
+              <div style="font-size: 0.85rem; color: var(--text-secondary); opacity: 0.8">
+                Search online databases, or click <b>Related</b> on a library paper. <b>Add to library</b> downloads open-access PDFs into the inbox and indexes them.
+              </div>
+            </div>
+          </div>
         </div>
       </aside>
     </div>
@@ -534,6 +579,7 @@
     </div>
 
     <!-- Application Script -->
-    <script src="app.js?v=3"></script>
+    <script src="app.js?v=4"></script>
+    <script src="discover.js?v=1"></script>
   </body>
 </html>

@@ -95,19 +95,19 @@ def import_zotero_library(
             file_hash = calculate_sha256(str(pdf_path))
             dest_dir = library_dir / file_hash
             dest_pdf = dest_dir / pdf_path.name
-            
-            dest_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Save source info for tracking
-            source_info_path = dest_dir / "source_info.txt"
-            source_info_path.write_text(f"source: Zotero\noriginal_path: {pdf_path}\nfilename: {pdf_path.name}\n")
-            
-            if not dest_pdf.exists():
-                shutil.copy2(str(pdf_path), str(dest_pdf))
-                ingested_count += 1
-                logger.debug(f"[{i}/{len(pdf_files)}] Ingested {pdf_path.name} -> {file_hash[:8]}...")
-            else:
+
+            # Same content = same hash folder: skip it whatever the file is called
+            # (previously a renamed copy was added a second time to the folder).
+            if dest_dir.exists() and any(dest_dir.glob("*.pdf")):
                 skipped_count += 1
+                continue
+
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            (dest_dir / "source_info.txt").write_text(
+                f"source: Zotero\noriginal_path: {pdf_path}\nfilename: {pdf_path.name}\n")
+            shutil.copy2(str(pdf_path), str(dest_pdf))
+            ingested_count += 1
+            logger.debug(f"[{i}/{len(pdf_files)}] Ingested {pdf_path.name} -> {file_hash[:8]}...")
                 
         except Exception as e:
             logger.error(f"Failed to ingest {pdf_path.name}: {e}")

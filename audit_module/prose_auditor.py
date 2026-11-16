@@ -120,10 +120,23 @@ def audit_prose(text: str, section: Optional[str] = None) -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
-    sample_text = """
+    import argparse
+    import json
+    import sys
+
+    parser = argparse.ArgumentParser(description="Audit the prose of a manuscript or grant text.")
+    parser.add_argument("files", nargs="*", help="text/LaTeX files to audit ('-' for stdin); none = built-in example")
+    parser.add_argument("--section", default=None, help="optional section name used in the report")
+    args = parser.parse_args()
+    if not args.files:
+        print("No file given: auditing a built-in example. Usage: python -m audit_module.prose_auditor draft.txt",
+              file=sys.stderr)
+        texts = {"example": """
     Moreover, this project requires no special setup. Importantly, we analyze the data carefully.
     Furthermore, the results are not always predictable, but we expect strong progress.
     Thus, our findings will optimize the model.
-    """
-    res = audit_prose(sample_text)
-    print(res)
+    """}
+    else:
+        texts = {f: (sys.stdin.read() if f == "-" else open(f, encoding="utf-8").read()) for f in args.files}
+    for name, text in texts.items():
+        print(json.dumps({"file": name, **audit_prose(text, section=args.section)}, indent=2, ensure_ascii=False))
