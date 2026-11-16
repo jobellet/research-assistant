@@ -25,7 +25,9 @@ All screenshots and animations were captured from the running application.
 10. [Worked example: a literature review](#10-worked-example-a-literature-review)
 11. [Manuscript and grant quality checks](#11-manuscript-and-grant-quality-checks)
 12. [Statistics page and mobile use](#12-statistics-page-and-mobile-use)
-13. [Command-line reference and troubleshooting](#13-command-line-reference-and-troubleshooting)
+13. [Ask your library (AI provider)](#13-ask-your-library-ai-provider)
+14. [Laptop and phone: Google Drive sync](#14-laptop-and-phone-google-drive-sync)
+15. [Command-line reference and troubleshooting](#15-command-line-reference-and-troubleshooting)
 
 ---
 
@@ -45,6 +47,8 @@ git-ignored, so keys never end up in the repository):
 |---|---|
 | `SERVER_PASSWORD` | Password for the web interface. If unset, a random token is printed at start-up. |
 | `HF_TOKEN` | Hugging Face token, needed once to download `google/embeddinggemma-300m`. |
+| `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `MISTRAL_API_KEY`, … | Optional AI provider for **Ask** (Section 13); or set it in ⚙ Settings. |
+| `GOOGLE_CLIENT_ID` | Optional Google OAuth Web Client ID for Drive sync (Section 14). |
 | `S2_API_KEY` | Optional [Semantic Scholar key](https://www.semanticscholar.org/product/api): higher rate limits for Discover and citation links. |
 | `OPENALEX_API_KEY` | Optional OpenAlex key (higher rate limits). |
 | `DATA_DIR` | Store `library/`, `inbox/` and `chroma_db/` elsewhere (e.g. a synced drive). |
@@ -301,7 +305,39 @@ Matches, Library, Graph).
 |---|---|
 | ![](docs/tutorial/22_stats.png) | ![](docs/tutorial/23_mobile.png) |
 
-## 13. Command-line reference and troubleshooting
+## 13. Ask your library (AI provider)
+
+With an API key from any provider (OpenAI, Gemini, Claude, Mistral, Groq, OpenRouter) or a
+local Ollama server, the **Ask** tab answers a question from your own papers: semantic search
+picks the eight most relevant papers, the model answers from their abstracts, weighs the
+evidence for and against, and cites them as [1], [2]… (click a number to jump to the source;
+**Text**, **PDF** and **Cite** work on each source). **Use highlighted text** asks what your
+library says about the sentence selected in the editor.
+
+![Ask](docs/tutorial/25_ask.png)
+
+Put a key in `.env` (e.g. `GEMINI_API_KEY=…`; the provider is detected automatically) or use
+**⚙ Settings → AI provider** (bottom of the left sidebar), then **Test**. The same provider is
+used to identify papers that neither arXiv nor Crossref can match. Details:
+[docs/sync-and-ai.md](docs/sync-and-ai.md#ai-provider-api-key).
+
+![Settings](docs/tutorial/26_settings.png)
+
+## 14. Laptop and phone: Google Drive sync
+
+Start a draft on the laptop and continue on your phone. Projects (`draft.tex`,
+`references.bib`) sync through a private Google Drive app folder; the same web page, published
+on GitHub Pages, works on the phone without the server ("browser mode"): you can write, browse
+and word-search your library, read abstracts, cite into `references.bib`, search OpenAlex and
+Crossref, and queue papers that your computer adds to the library at its next sync. Semantic
+search, Ask and the graph need the computer.
+
+![Phone: editor, library word search, online search, settings](docs/tutorial/27_phone.png)
+
+Set-up (Google OAuth Client ID, GitHub Pages) and conflict handling:
+[docs/sync-and-ai.md](docs/sync-and-ai.md#google-drive-sync).
+
+## 15. Command-line reference and troubleshooting
 
 | Command | Purpose |
 |---|---|

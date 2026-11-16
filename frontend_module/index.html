@@ -8,7 +8,7 @@
       name="description"
       content="AI-powered LaTeX editor with semantic search and citation management across multiple projects."
     />
-    <link rel="stylesheet" href="style.css?v=4" />
+    <link rel="stylesheet" href="style.css?v=5" />
     <!-- Load D3.js for Knowledge Graph -->
     <script src="https://d3js.org/d3.v7.min.js"></script>
   </head>
@@ -93,6 +93,10 @@
 
         <!-- Delete Project -->
         <div class="sidebar-footer">
+          <div id="sync-indicator" class="sync-indicator" role="status" aria-live="polite"></div>
+          <button id="btn-settings" class="settings-btn" title="AI provider and Google Drive sync">
+            ⚙ Settings
+          </button>
           <button
             id="btn-delete-project"
             class="danger-btn"
@@ -274,6 +278,16 @@
           >
             Discover
           </button>
+          <button
+            id="tab-ask"
+            class="panel-tab"
+            role="tab"
+            aria-controls="ask-container"
+            aria-selected="false"
+            title="Ask a question answered from your library (needs an AI provider)"
+          >
+            Ask
+          </button>
         </div>
 
         <div
@@ -391,7 +405,7 @@
                 Filter
               </button>
               <button
-                id="btn-search-semantic"
+                id="btn-search-semantic" data-server-only="1"
                 class="view-btn"
                 aria-pressed="false"
                 style="
@@ -502,6 +516,33 @@
             </div>
           </div>
         </div>
+              <div
+          id="ask-container"
+          class="panel-content"
+          style="display: none"
+          role="tabpanel"
+          aria-labelledby="tab-ask"
+        >
+          <div class="discover-controls">
+            <textarea id="ask-input" rows="3" aria-label="Question about your library"
+              placeholder="Ask a question — answered from your own papers, with citations"></textarea>
+            <div class="discover-buttons">
+              <button id="btn-ask" class="view-btn active">Ask</button>
+              <button id="btn-ask-selection" class="view-btn" title="Use the text highlighted in the editor">Use highlighted text</button>
+            </div>
+            <div id="ask-status" class="discover-status" role="status" aria-live="polite"></div>
+          </div>
+          <div id="ask-results">
+            <div class="empty-state" style="text-align: center; padding: 2rem 1rem">
+              <div style="font-size: 2rem; margin-bottom: 1rem" aria-hidden="true">💬</div>
+              <div class="text-secondary" style="margin-bottom: 0.5rem; font-weight: 500">Ask your library</div>
+              <div style="font-size: 0.85rem; color: var(--text-secondary); opacity: 0.8">
+                The answer uses only the most relevant papers of your library and cites them as [1], [2]…
+                Needs an AI provider (⚙ Settings).
+              </div>
+            </div>
+          </div>
+        </div>
       </aside>
     </div>
 
@@ -579,7 +620,15 @@
     </div>
 
     <!-- Application Script -->
-    <script src="app.js?v=4"></script>
+    <script src="sync-merge.js?v=1"></script>
+    <script src="project-store.js?v=1"></script>
+    <script src="google-auth.js?v=1"></script>
+    <script src="drive-sync.js?v=1"></script>
+    <script src="literature-core.js?v=1"></script>
+    <script src="phone-library.js?v=1"></script>
+    <script src="app.js?v=5"></script>
     <script src="discover.js?v=1"></script>
+    <script src="ask.js?v=1"></script>
+    <script src="settings.js?v=1"></script>
   </body>
 </html>

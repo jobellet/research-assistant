@@ -193,6 +193,17 @@ CLI helper script running HuggingFace `pipeline` text generation with `deepseek-
 - `discover.py`: `search_literature`, `related_to_paper`, `related_to_text`, `merge_ranked`, `library_index` (marks results already in the library), `resolve_identifier`, `download_to_inbox` (refuses non-PDF responses).
 - `__main__.py`: CLI (`search`, `related`, `text`, `fetch`, `--fetch-top N`, `--json`).
 
+### AI Module (`ai_module/`)
+- `provider.py`: provider-agnostic LLM calls over HTTP (port of ADHDtools `core/ai-provider.js`): `PROVIDERS` (openai, gemini, anthropic, mistral, groq, openrouter, custom/OpenAI-compatible), `get_settings()` (ai_settings.json in DATA_DIR → `AI_*` env → auto-detect provider keys), `save_settings`, `public_settings` (key masked), `is_enabled`, `complete`, `stream` (SSE for every style), `complete_json`, `test_connection`. Used by `server_module/chat.py` (Ask / `POST /api/chat`) and `extract_module/llm_utils.extract_metadata_with_llm`; falls back to the LLM worker.
+
+### Browser-side modules (`frontend_module/`)
+- `project-store.js`: `window.ProjectStore` — projects via the server API or, in browser mode (no server, e.g. GitHub Pages on a phone), in localStorage; `snapshot()` / `applySnapshot()` for sync; project tombstones.
+- `sync-merge.js` (also Node): `mergeSnapshots(local, remote, lastSyncAt)` — newest file wins, deletions win over older versions, edits on both sides kept as `<name> - conflict <date>`.
+- `google-auth.js`, `drive-sync.js`: Google sign-in (Web Client ID, GIS token flow) and sync through the Drive `appDataFolder`: `research-assistant-projects.json` (merged both ways), `research-assistant-library.json` (library index uploaded by a page in server mode, from `GET /api/library/export`), `research-assistant-inbox.json` ("add to library" requests from the phone, run by the computer via `POST /api/discover/fetch`).
+- `literature-core.js` (also Node): JavaScript ports of BibTeX generation (`citation_manager.py`), result merging/ranking and query terms (`discover.py`), OpenAlex/Crossref parsing, word search.
+- `phone-library.js`: browser-mode library (IndexedDB copy of the index), word search, Cite, OpenAlex/Crossref Discover, add-to-library queue.
+- `ask.js`, `settings.js`: Ask tab and Settings panel (AI provider, Drive sync). Tests: `tests/js/*.test.mjs` (`node --test`, run by `tests/test_js.py`).
+
 ### Server Module (`server_module/`)
 
 #### [`server_module/main.py`](server_module/main.py)
@@ -213,6 +224,7 @@ FastAPI application backend serving REST endpoints and static web assets.
   - `GET /api/graph/semantic` (`{"status": "building"}` while rebuilding), `POST /api/graph/rebuild`, `POST /api/graph/focus`, `GET /api/graph/citations` (built in the background; poll), `GET /api/graph/neighbors/{hash_id}`, legacy `GET /api/graph`.
   - `POST /api/discover/search`, `POST /api/discover/text`, `GET /api/discover/related/{hash_id}`, `POST /api/discover/fetch`: online literature discovery (see `discovery_module/`).
   - `POST /api/audit/claims`: grounded claim audit.
+  - `GET/PUT /api/ai/settings`, `POST /api/ai/test`: AI provider (key never returned). `GET /api/client-config`: public Google Client ID. `GET /api/library/export`: library index for Drive sync. `PUT /api/projects/{name}/bib`; draft/bib reads return `updated_at` and writes accept it (sync keeps timestamps).
   - `GET /api/papers_of_the_day`, `GET /api/seminal_papers`: recent papers citing the library / most-cited references not in the library (no UI yet).
   - `POST /api/chat/start|stop`, `GET /api/chat/status`, `POST /api/chat`: optional LLM worker (SLURM or local) for RAG answers.
   - `GET /dashboard`: Backend Monitor page; `/ui/`: web interface.

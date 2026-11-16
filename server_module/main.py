@@ -98,6 +98,7 @@ class ProjectCreateRequest(BaseModel):
 
 class DraftSaveRequest(BaseModel):
     content: str
+    updated_at: Optional[int] = None   # ms since epoch, used by Drive sync
 
 class CitationAddRequest(BaseModel):
     hash_id: str
@@ -131,6 +132,25 @@ def get_project_path(name: str) -> Path:
     if path.resolve().parent != PROJECTS_DIR.resolve():
         raise HTTPException(status_code=400, detail="Invalid project name.")
     return path
+
+PROJECT_FILES = {"draft": "draft.tex", "bib": "references.bib"}
+
+
+def _mtime_ms(path: Path) -> int:
+    try:
+        return int(round(path.stat().st_mtime * 1000))
+    except OSError:
+        return 0
+
+
+def _write_project_file(path: Path, content: str, updated_at: Optional[int] = None):
+    """Write a project file; ``updated_at`` (ms) keeps a synced file's original timestamp
+    so that devices syncing through Google Drive do not ping-pong the same version."""
+    path.write_text(content)
+    if updated_at:
+        ts = updated_at / 1000
+        os.utime(path, (ts, ts))
+
 
 def ensure_project_exists(name: str) -> Path:
     path = get_project_path(name)
@@ -286,6 +306,12 @@ def shutdown_event():
 def health_check():
     return {"status": "ok", "message": "Research Assistant API is online."}
 
+
+@app.get("/api/client-config")
+def client_config():
+    """Public, non-secret settings for the web page (Google OAuth Client ID for Drive sync)."""
+    return {"google_client_id": os.getenv("GOOGLE_CLIENT_ID", "")}
+
 @app.get("/api/stats")
 async def get_library_stats():
     library_dir = LIBRARY_DIR
@@ -419,6 +445,40 @@ def get_library():
     papers.sort(key=lambda p: (str(p["metadata"].get("year") or ""), p["metadata"].get("title", "").lower()),
                 reverse=True)
     return {"papers": papers}
+
+@app.get("/api/library/export", dependencies=[Depends(verify_auth_token)])
+def export_library_index():
+    """Compact library index (metadata + abstracts, no PDFs or full text) that the web page
+    copies to Google Drive so the phone can browse, search and cite the library."""
+    import hashlib
+    papers = []
+    if LIBRARY_DIR.exists():
+        for hash_dir in sorted(LIBRARY_DIR.iterdir()):
+            if not hash_dir.is_dir():
+                continue
+            meta = _read_metadata(hash_dir)
+            if not meta:
+                continue
+            authors = meta.get("authors") or []
+            keywords = meta.get("keywords") or []
+            arxiv_id = meta.get("arxiv_id") or ""
+            if not arxiv_id:
+                m = re.match(r"^(\d{4}\.\d{4,5})", meta.get("pdf_filename") or "")
+                arxiv_id = m.group(1) if m else ""
+            papers.append({
+                "hash_id": hash_dir.name,
+                "title": meta.get("title", ""),
+                "authors": authors if isinstance(authors, list) else [a.strip() for a in str(authors).split(",") if a.strip()],
+                "year": str(meta.get("year") or ""),
+                "journal": meta.get("journal", ""),
+                "doi": meta.get("doi", ""),
+                "arxiv_id": arxiv_id,
+                "keywords": keywords if isinstance(keywords, list) else [k.strip() for k in str(keywords).split(",") if k.strip()],
+                "summary": meta.get("summary", ""),
+            })
+    version = hashlib.sha256(json.dumps(papers, sort_keys=True).encode()).hexdigest()[:16]
+    return {"app": "research-assistant-library", "version": version, "papers": papers}
+
 
 @app.get("/api/library/text/{hash_id}", dependencies=[Depends(verify_auth_token)])
 def get_library_text(hash_id: str):
@@ -851,6 +911,9 @@ def start_chat_worker():
 def chat_worker_status():
     from pathlib import Path
     import requests
+    from ai_module import provider
+    if provider.is_enabled():
+        return {"status": "ready", "provider": provider.public_settings()["label"]}
     
     url_file = LIBRARY_DIR / ".llm_worker_url"
     if url_file.exists():
@@ -1005,8 +1068,11 @@ def get_knowledge_graph_legacy():
 def list_projects():
     """Return list of all project names."""
     PROJECTS_DIR.mkdir(exist_ok=True)
-    projects = sorted([p.name for p in PROJECTS_DIR.iterdir() if p.is_dir()])
-    return {"projects": projects}
+    dirs = sorted(p for p in PROJECTS_DIR.iterdir() if p.is_dir() and not p.name.startswith("."))
+    details = {}
+    for p in dirs:
+        details[p.name] = {f: _mtime_ms(p / fname) for f, fname in PROJECT_FILES.items()}
+    return {"projects": [p.name for p in dirs], "details": details}
 
 @app.post("/api/projects", dependencies=[Depends(verify_auth_token)])
 def create_project(req: ProjectCreateRequest):
@@ -1041,14 +1107,14 @@ def get_draft(name: str):
     project_path = ensure_project_exists(name)
     draft_file = project_path / "draft.tex"
     content = draft_file.read_text() if draft_file.exists() else ""
-    return {"name": name, "content": content}
+    return {"name": name, "content": content, "updated_at": _mtime_ms(draft_file)}
 
 @app.put("/api/projects/{name}/draft", dependencies=[Depends(verify_auth_token)])
 def save_draft(name: str, req: DraftSaveRequest):
     """Save the .tex draft content for a project."""
     project_path = ensure_project_exists(name)
-    (project_path / "draft.tex").write_text(req.content)
-    return {"status": "saved", "name": name}
+    _write_project_file(project_path / "draft.tex", req.content, req.updated_at)
+    return {"status": "saved", "name": name, "updated_at": _mtime_ms(project_path / "draft.tex")}
 
 @app.get("/api/projects/{name}/bib", dependencies=[Depends(verify_auth_token)])
 def get_bib(name: str):
@@ -1056,7 +1122,15 @@ def get_bib(name: str):
     project_path = ensure_project_exists(name)
     bib_file = project_path / "references.bib"
     content = bib_file.read_text() if bib_file.exists() else ""
-    return {"name": name, "content": content}
+    return {"name": name, "content": content, "updated_at": _mtime_ms(bib_file)}
+
+
+@app.put("/api/projects/{name}/bib", dependencies=[Depends(verify_auth_token)])
+def save_bib(name: str, req: DraftSaveRequest):
+    """Save the BibTeX file (edited in the editor or merged from Drive sync)."""
+    project_path = ensure_project_exists(name)
+    _write_project_file(project_path / "references.bib", req.content, req.updated_at)
+    return {"status": "saved", "name": name, "updated_at": _mtime_ms(project_path / "references.bib")}
 
 @app.post("/api/citation/add", dependencies=[Depends(verify_auth_token)])
 def add_citation(request: CitationAddRequest):
@@ -1102,6 +1176,43 @@ def get_neighbor_graph(hash_id: str):
     except Exception as e:
         logger.error(f"Failed to build neighbor graph for {hash_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# --- AI provider (API key: OpenAI, Gemini, Claude, Mistral, Groq, OpenRouter, local) ---
+
+class AISettingsRequest(BaseModel):
+    provider: str
+    api_key: Optional[str] = None      # None = keep the stored key
+    model: str = ""
+    base_url: str = ""
+
+
+@app.get("/api/ai/settings", dependencies=[Depends(verify_auth_token)])
+def get_ai_settings():
+    """Current AI provider (the API key is never returned, only whether one is set)."""
+    from ai_module import provider
+    return provider.public_settings()
+
+
+@app.put("/api/ai/settings", dependencies=[Depends(verify_auth_token)])
+def put_ai_settings(req: AISettingsRequest):
+    from ai_module import provider
+    try:
+        return provider.save_settings(req.provider, req.api_key, req.model, req.base_url)
+    except provider.AIError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/ai/test", dependencies=[Depends(verify_auth_token)])
+def test_ai_settings():
+    from ai_module import provider
+    if not provider.is_enabled():
+        raise HTTPException(status_code=400, detail="No AI provider configured.")
+    try:
+        answer = provider.test_connection()
+    except provider.AIError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"ok": True, "answer": answer[:200], **provider.public_settings()}
+
 
 # --- Literature discovery (arXiv / Semantic Scholar / OpenAlex / Crossref) ---
 

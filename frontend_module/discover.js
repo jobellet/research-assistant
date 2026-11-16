@@ -83,14 +83,30 @@
     }).join("");
   }
 
+  const browserMode = () => window.ProjectStore && window.ProjectStore.isBrowserMode();
+
+  // Without a server the same searches run in the browser (phone-library.js)
+  function browserCall(path, opts) {
+    const body = opts && opts.body ? JSON.parse(opts.body) : {};
+    if (path.startsWith("/api/discover/search")) return window.PhoneLibrary.discover("search", body);
+    if (path.startsWith("/api/discover/text")) return window.PhoneLibrary.discover("text", body);
+    const hash = decodeURIComponent(path.split("/").pop());
+    return window.PhoneLibrary.discover("related", { hash });
+  }
+
   async function call(path, opts, heading, busyMsg) {
     showTab();
     setStatus(busyMsg);
     resultsEl.innerHTML = `<div class="text-secondary" style="text-align:center;margin-top:2rem">${esc(busyMsg)}</div>`;
     try {
-      const res = await fetch(path, { headers: headers(), ...opts });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.status);
-      const data = await res.json();
+      let data;
+      if (browserMode()) {
+        data = await browserCall(path, opts);
+      } else {
+        const res = await fetch(path, { headers: headers(), ...opts });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.status);
+        data = await res.json();
+      }
       render(data, heading(data));
     } catch (e) {
       console.error("Discover error:", e);
@@ -109,7 +125,9 @@
   }
 
   function fromSelection() {
-    const text = (window.appState && window.appState.lastSelection) || window.getSelection().toString();
+    const text = (window.appState && window.appState.lastSelection) || window.getSelection().toString() ||
+      (browserMode() ? (document.getElementById("latex-editor").value.slice(
+        document.getElementById("latex-editor").selectionStart, document.getElementById("latex-editor").selectionEnd)) : "");
     if (!text || text.trim().length < 10) {
       setStatus("Highlight a sentence in the editor first.");
       return showTab();
@@ -129,6 +147,12 @@
     const cand = lastResults[index];
     if (!cand) return;
     btn.disabled = true;
+    if (browserMode()) {
+      window.PhoneLibrary.queueAdd(cand);
+      btn.textContent = "Queued for your computer";
+      btn.title = "Your computer downloads it into the library at its next Google Drive sync";
+      return;
+    }
     btn.textContent = "Downloading…";
     try {
       const res = await fetch("/api/discover/fetch", {

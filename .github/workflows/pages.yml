@@ -1,0 +1,34 @@
+# Publishes the web editor (frontend_module/) to GitHub Pages so it can be opened on a
+# phone without the server ("browser mode": projects in the browser + Google Drive sync).
+# One-time setup: repository Settings → Pages → Source: GitHub Actions.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths: ["frontend_module/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend_module
+      - id: deployment
+        uses: actions/deploy-pages@v4

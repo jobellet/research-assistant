@@ -10,11 +10,15 @@ if (new URLSearchParams(window.location.search).get("token")) {
   CONFIG.AUTH_TOKEN = sessionStorage.getItem("auth_token");
 }
 
-if (!CONFIG.AUTH_TOKEN) {
-  // No token in URL or session: ask once (the server prints/uses SERVER_PASSWORD)
-  CONFIG.AUTH_TOKEN = window.prompt("Enter your SERVER_PASSWORD:") || "";
-  if (CONFIG.AUTH_TOKEN) sessionStorage.setItem("auth_token", CONFIG.AUTH_TOKEN);
+// The password is asked in init(), only when a research-assistant server answers
+// (without a server the page works in browser mode: projects + Google Drive sync).
+function ensureAuthToken() {
+  if (!CONFIG.AUTH_TOKEN) {
+    CONFIG.AUTH_TOKEN = window.prompt("Enter your SERVER_PASSWORD:") || "";
+    if (CONFIG.AUTH_TOKEN) sessionStorage.setItem("auth_token", CONFIG.AUTH_TOKEN);
+  }
 }
+window.CONFIG = CONFIG;
 
 (() => {
   // Remove the token from the address bar (history, screenshots) and honour
@@ -107,6 +111,31 @@ const authHeaders = () => ({
 // =============================================================================
 
 async function init() {
+  // Server or browser mode
+  state.serverMode = await window.ProjectStore.detectServer();
+  if (state.serverMode) {
+    window.ProjectStore.useServer();
+    ensureAuthToken();
+    try {
+      const cfg = await (await fetch(`${CONFIG.API_BASE}/api/client-config`)).json();
+      window.GoogleAuth.setServerClientId(cfg.google_client_id || "");
+    } catch (e) { /* optional */ }
+  } else {
+    window.ProjectStore.useBrowser();
+    applyBrowserMode();
+  }
+  window.appBeforeSync = async () => {
+    if (state.saveTimer) clearTimeout(state.saveTimer);
+    if (saveStatus.textContent === "Unsaved") await saveCurrentFile(true);
+  };
+  window.addEventListener("projectsSynced", async (e) => {
+    const conflicts = (e.detail && e.detail.conflicts) || [];
+    if (conflicts.length) {
+      showToast(`Edited on two devices: the other version was kept as "${conflicts[0].name}".`, 6000);
+    }
+    await loadProjects();
+  });
+
   // Wire up view toggle
   btnEditor.addEventListener("click", () => switchView("editor"));
   btnGraph.addEventListener("click", () => switchView("graph"));
@@ -186,7 +215,9 @@ async function init() {
 
   // Wire up file tab clicks
   fileListItems.forEach((item) => {
-    item.addEventListener("click", () => {
+    item.addEventListener("click", async () => {
+      if (state.saveTimer) clearTimeout(state.saveTimer);
+      if (saveStatus.textContent === "Unsaved") await saveCurrentFile(true);
       fileListItems.forEach((i) => i.classList.remove("active"));
       item.classList.add("active");
       state.activeFile = item.dataset.file;
@@ -259,8 +290,9 @@ async function init() {
     }
   }
 
-  // Load Library data
-  await loadLibrary();
+  // Load Library data (needs the server)
+  if (state.serverMode) await loadLibrary();
+  if (window.DriveSync) window.DriveSync.start();
 
   // Mobile specific initialization
   initMobileUI();
@@ -276,6 +308,36 @@ async function init() {
   });
 
   console.log("Research Assistant — Multi-Project UI initialized");
+}
+
+// Browser mode: no server (e.g. the page opened on a phone from GitHub Pages).
+// Projects live in this browser and sync through Google Drive; library features
+// need the server and are replaced by an explanation.
+function applyBrowserMode() {
+  document.body.classList.add("browser-mode");
+  const note = `
+    <div class="empty-state" style="text-align:center;padding:2rem 1rem">
+      <div style="font-size:2rem;margin-bottom:1rem" aria-hidden="true">💻</div>
+      <div class="text-secondary" style="margin-bottom:0.5rem;font-weight:500">No server here</div>
+      <div style="font-size:0.85rem;color:var(--text-secondary);opacity:0.85">
+        Projects are stored in this browser and synced with your computer through Google Drive (⚙ Settings).
+        Your library appears here after your computer has synced once (open the app on the computer with
+        Drive connected). Semantic search, Ask, full texts and the knowledge graph need the computer.
+      </div>
+    </div>`;
+  ["library-list", "results-container", "ask-results"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = note;
+  });
+  document.querySelectorAll(".server-only, [data-server-only]").forEach((el) => (el.style.display = "none"));
+  if (btnGraph) btnGraph.style.display = "none";
+  if (btnSearchFreq) btnSearchFreq.textContent = "Words";
+  // arXiv and Semantic Scholar refuse requests from web pages: search OpenAlex + Crossref
+  document.querySelectorAll('.discover-sources input[value="arxiv"], .discover-sources input[value="semantic_scholar"]')
+    .forEach((el) => { el.checked = false; el.closest("label").style.display = "none"; });
+  const cr = document.querySelector('.discover-sources input[value="crossref"]');
+  if (cr) cr.checked = true;
+  if (window.PhoneLibrary) window.PhoneLibrary.init();
 }
 
 function initMobileUI() {
@@ -331,6 +393,11 @@ function switchSidePanel(tab) {
       document.getElementById("discover-container"),
       "mobile-btn-matches",
     ],
+    ask: [
+      document.getElementById("tab-ask"),
+      document.getElementById("ask-container"),
+      "mobile-btn-matches",
+    ],
   };
   Object.entries(panels).forEach(([name, [tabEl, container]]) => {
     if (!tabEl || !container) return;
@@ -354,20 +421,10 @@ window.switchSidePanel = switchSidePanel;
 
 async function loadProjects() {
   try {
-    const res = await fetch(`${CONFIG.API_BASE}/api/projects`, {
-      headers: authHeaders(),
-    });
-    if (!res.ok) throw new Error("Failed to list projects");
-    const data = await res.json();
-
+    const projects = await window.ProjectStore.list();
+    const previous = projectSelect.value;
     projectSelect.innerHTML = "";
-    if (!data.projects || data.projects.length === 0) {
-      // No projects — create default
-      await createProjectByName("default");
-      return loadProjects();
-    }
-
-    data.projects.forEach((name) => {
+    projects.forEach((name) => {
       const opt = document.createElement("option");
       opt.value = name;
       opt.textContent = name;
@@ -375,12 +432,13 @@ async function loadProjects() {
     });
 
     // Restore last-used project from localStorage
-    const last = localStorage.getItem("activeProject") || data.projects[0];
-    const toSelect = data.projects.includes(last) ? last : data.projects[0];
+    const last = state.activeProject || localStorage.getItem("activeProject") || previous || projects[0];
+    const toSelect = projects.includes(last) ? last : projects[0];
     projectSelect.value = toSelect;
     await switchProject(toSelect, false); // false = don't prompt unsaved
   } catch (err) {
     console.error("loadProjects error:", err);
+    setSaveStatus(state.serverMode ? "Server error" : "Storage error");
   }
 }
 
@@ -396,23 +454,19 @@ async function switchProject(name, guardUnsaved = true) {
 
 async function loadCurrentFile() {
   if (!state.activeProject) return;
-
-  const endpoint =
-    state.activeFile === "draft"
-      ? `/api/projects/${state.activeProject}/draft`
-      : `/api/projects/${state.activeProject}/bib`;
+  // Do not overwrite text the user is typing (e.g. when a sync arrives)
+  if (saveStatus.textContent === "Unsaved" && state.loadedFile === `${state.activeProject}/${state.activeFile}`) {
+    return;
+  }
 
   const ext = state.activeFile === "draft" ? "draft.tex" : "references.bib";
   currentFilename.textContent = `${state.activeProject} / ${ext}`;
 
   try {
-    const res = await fetch(`${CONFIG.API_BASE}${endpoint}`, {
-      headers: authHeaders(),
-    });
-    if (!res.ok) throw new Error(`Failed to load ${state.activeFile}`);
-    const data = await res.json();
+    const data = await window.ProjectStore.read(state.activeProject, state.activeFile);
     editor.value = data.content;
     state.currentContent = data.content;
+    state.loadedFile = `${state.activeProject}/${state.activeFile}`;
     setSaveStatus("Saved");
   } catch (err) {
     console.error("loadCurrentFile error:", err);
@@ -421,27 +475,17 @@ async function loadCurrentFile() {
 }
 
 async function saveCurrentFile(silent = false) {
-  if (!state.activeProject || state.activeFile !== "draft") return; // only auto-save .tex
+  if (!state.activeProject || state.loadedFile !== `${state.activeProject}/${state.activeFile}`) return;
   if (!silent) setSaveStatus("Saving…");
 
   try {
-    const res = await fetch(
-      `${CONFIG.API_BASE}/api/projects/${state.activeProject}/draft`,
-      {
-        method: "PUT",
-        headers: authHeaders(),
-        body: JSON.stringify({ content: editor.value }),
-      },
-    );
-    if (res.ok) {
-      state.currentContent = editor.value;
-      setSaveStatus("Saved");
-    } else {
-      setSaveStatus("Save failed");
-    }
+    await window.ProjectStore.write(state.activeProject, state.activeFile, editor.value);
+    state.currentContent = editor.value;
+    setSaveStatus("Saved");
+    if (window.DriveSync) window.DriveSync.notifyLocalChange();
   } catch (err) {
     console.error("saveCurrentFile error:", err);
-    setSaveStatus("Save error");
+    setSaveStatus("Save failed");
   }
 }
 
@@ -469,11 +513,13 @@ async function createProject() {
   btnCreateProject.innerHTML = "Creating...";
 
   try {
-    await createProjectByName(name);
-    hideNewProjectModal();
-    await loadProjects();
-    projectSelect.value = name;
-    await switchProject(name, false);
+    const created = await createProjectByName(name);
+    if (created) {
+      hideNewProjectModal();
+      state.activeProject = created;
+      await loadProjects();
+      if (window.DriveSync) window.DriveSync.notifyLocalChange();
+    }
   } finally {
     const isEmpty = !newProjectName.value.trim();
     btnCreateProject.disabled = isEmpty;
@@ -489,19 +535,21 @@ async function createProject() {
 
 async function createProjectByName(name) {
   try {
-    const res = await fetch(`${CONFIG.API_BASE}/api/projects`, {
-      method: "POST",
-      headers: authHeaders(),
-      body: JSON.stringify({ name }),
-    });
-    if (!res.ok && res.status !== 409) throw new Error("Create project failed");
+    const r = await window.ProjectStore.create(name);
+    return r.name || name;
   } catch (err) {
     console.error("createProjectByName error:", err);
+    showToast(err.message || "Could not create the project.", 4000);
+    return null;
   }
 }
 
 async function deleteProject() {
   if (!state.activeProject) return;
+  if (window.ProjectStore.PROTECTED.has(state.activeProject)) {
+    showToast(`The "${state.activeProject}" project cannot be deleted.`, 3000);
+    return;
+  }
   if (
     !confirm(`Delete project "${state.activeProject}"? This cannot be undone.`)
   )
@@ -513,18 +561,14 @@ async function deleteProject() {
   btnDeleteProject.innerHTML = "🗑 Deleting...";
 
   try {
-    const res = await fetch(
-      `${CONFIG.API_BASE}/api/projects/${state.activeProject}`,
-      {
-        method: "DELETE",
-        headers: authHeaders(),
-      },
-    );
-    if (!res.ok) throw new Error("Delete failed");
+    await window.ProjectStore.remove(state.activeProject);
     state.activeProject = null;
+    state.loadedFile = null;
     await loadProjects();
+    if (window.DriveSync) window.DriveSync.notifyLocalChange();
   } catch (err) {
     console.error("deleteProject error:", err);
+    showToast(err.message || "Delete failed", 4000);
   } finally {
     btnDeleteProject.disabled = false;
     btnDeleteProject.removeAttribute("aria-busy");
@@ -544,7 +588,7 @@ function handleInput(e) {
 }
 
 function handleHighlight() {
-  if (state.activeFile !== "draft") return;
+  if (state.activeFile !== "draft" || !state.serverMode) return;
   const selectedText = window.getSelection().toString().trim();
   if (selectedText.length > 10) {
     state.lastSelection = selectedText;
@@ -692,6 +736,13 @@ async function handleLibrarySearch(e) {
       );
     });
     renderLibrary(filtered);
+  } else if (!state.serverMode) {
+    // Browser mode: word search over the synced library index
+    let papers = window.PhoneLibrary ? window.PhoneLibrary.search(q) : [];
+    if (fYear) papers = papers.filter((p) => String(p.metadata.year) === fYear);
+    if (fAuthor) papers = papers.filter((p) => p.metadata.authors.toLowerCase().includes(fAuthor));
+    if (fJournal) papers = papers.filter((p) => (p.metadata.journal || "").toLowerCase().includes(fJournal));
+    renderLibrary(papers);
   } else {
     // Server-side search (Semantic or BOW)
     state.debounceTimer = setTimeout(async () => {

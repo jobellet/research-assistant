@@ -243,14 +243,24 @@ def extract_metadata_with_llm(text: str = "", image_b64: str = None, model: str 
         payload = {"prompt": prompt}
     
     try:
-        url_file = Path("library") / ".llm_worker_url"
-        if not url_file.exists(): return None
-        
-        worker_url = url_file.read_text().strip()
-        resp = requests.post(f"{worker_url}/generate", json=payload, timeout=90)
-        if resp.status_code != 200: return None
-        
-        json_match = re.search(r'(\{.*\})', resp.text, re.DOTALL)
+        raw_answer = None
+        # 1. Configured AI provider (API key) for text clues
+        try:
+            from ai_module import provider
+            if not image_b64 and provider.is_enabled():
+                raw_answer = provider.complete(prompt, max_tokens=2000, temperature=0)
+        except Exception as e:
+            logger.warning(f"AI provider metadata clue failed: {e}")
+        # 2. Optional LLM worker (cluster or local)
+        if raw_answer is None:
+            url_file = Path("library") / ".llm_worker_url"
+            if not url_file.exists(): return None
+            worker_url = url_file.read_text().strip()
+            resp = requests.post(f"{worker_url}/generate", json=payload, timeout=90)
+            if resp.status_code != 200: return None
+            raw_answer = resp.text
+
+        json_match = re.search(r'(\{.*\})', raw_answer, re.DOTALL)
         if json_match:
             clues = json.loads(json_match.group(1))
             

@@ -33,3 +33,6 @@ projects/*
 # OS Specific
 .DS_Store
 Thumbs.db
+
+# AI provider settings (contain an API key)
+ai_settings.json

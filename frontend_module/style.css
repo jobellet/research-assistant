@@ -936,3 +936,58 @@ iframe#pdf-frame {
   color: var(--text-secondary);
 }
 .source-badge.in-library { border-color: var(--accent-color); color: var(--accent-color); }
+
+/* Settings panel, sync indicator, Ask tab */
+.settings-btn {
+  width: 100%;
+  margin-bottom: 0.5rem;
+  padding: 0.55rem;
+  border-radius: 0.375rem;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+.settings-btn:hover { border-color: var(--accent-color); }
+.sync-indicator { font-size: 0.75rem; color: var(--text-secondary); min-height: 1.1em; margin-bottom: 0.4rem; }
+.settings-content { max-width: 560px; width: 92vw; max-height: 90vh; overflow-y: auto; height: auto; }
+.settings-body { padding: 0 1.25rem 1.25rem; }
+.settings-section { border-top: 1px solid var(--glass-border); padding-top: 1rem; margin-top: 1rem; }
+.settings-section h3 { font-size: 1rem; margin: 0 0 0.5rem; color: var(--text-primary); }
+.settings-section label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85rem;
+  color: var(--text-secondary); margin: 0.6rem 0; }
+.settings-section input[type="text"], .settings-section input[type="password"], .settings-section select,
+#ask-input {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 0.375rem;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  padding: 0.55rem;
+  box-sizing: border-box;
+  width: 100%;
+}
+.settings-section label.settings-check { flex-direction: row; align-items: center; gap: 0.5rem; }
+.settings-note { font-size: 0.82rem; color: var(--text-secondary); line-height: 1.45; }
+.settings-note a { color: var(--accent-color); }
+.settings-hint { font-size: 0.75rem; color: var(--text-secondary); margin-top: -0.3rem; }
+.settings-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+.settings-status { font-size: 0.82rem; color: var(--text-secondary); margin-top: 0.5rem; min-height: 1.2em; }
+#ask-input { resize: vertical; min-height: 4.5rem; }
+.ask-answer { font-size: 0.9rem; line-height: 1.55; color: var(--text-primary); }
+.ask-answer p { margin: 0 0 0.7rem; }
+.ask-ref { color: var(--accent-color); text-decoration: none; font-weight: 600; }
+#ask-results { overflow-y: auto; }
+#settings-modal { z-index: 3000; }
+.settings-content .modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.25rem 0;
+}
+.settings-content .modal-header h2 { margin: 0; font-size: 1.2rem; color: var(--text-primary); }
+.settings-content .close-modal { position: static; }
+/* Browser mode (no server): hide what needs the server */
+.browser-mode button[onclick^="openQuickGraph"],
+.browser-mode #mobile-btn-graph { display: none !important; }
