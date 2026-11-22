@@ -84,3 +84,15 @@ def test_rate_limit():
     for _ in range(61):
         last = s.handle(rpc("tools/call", {"name": "discover_papers", "arguments": {"query": "q"}}))
     assert last["result"]["isError"] and "Rate limit" in last["result"]["content"][0]["text"]
+
+
+def test_odd_metadata_shapes_and_empty_id(tmp_path):
+    d = tmp_path / "odd"
+    d.mkdir()
+    (d / "metadata.json").write_text(json.dumps({"title": "Odd", "authors": [{"name": "A B"}, {"given": "C", "family": "D"}],
+                                                 "keywords": [{"name": "k"}], "summary": "workspace"}))
+    s = McpServer("library", tmp_path)
+    hit = json.loads(s.handle(rpc("tools/call", {"name": "search_library", "arguments": {"query": "workspace"}}))["result"]["content"][0]["text"])
+    assert hit[0]["authors"] == ["A B", "C D"]
+    for ident in ("", "  "):
+        assert s.handle(rpc("tools/call", {"name": "cite", "arguments": {"id": ident}}))["result"]["isError"]

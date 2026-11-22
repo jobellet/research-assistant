@@ -60,10 +60,23 @@ LIBRARY_TOOLS = [
 ]
 
 
+def _names(value) -> List[str]:
+    """Authors/keywords as a list of strings, whatever the stored shape (list of str or dict, or str)."""
+    if not value:
+        return []
+    if isinstance(value, str):
+        return [v.strip() for v in value.split(",") if v.strip()]
+    out = []
+    for v in value:
+        if isinstance(v, dict):
+            v = v.get("name") or " ".join(str(v.get(k, "")) for k in ("given", "family")).strip()
+        if v:
+            out.append(str(v))
+    return out
+
+
 def _short(c: Dict) -> Dict:
-    authors = c.get("authors") or []
-    if isinstance(authors, str):
-        authors = [a.strip() for a in authors.split(",") if a.strip()]
+    authors = _names(c.get("authors"))
     return {k: v for k, v in {
         "title": c.get("title", ""), "authors": authors[:8], "year": c.get("year", ""),
         "venue": c.get("journal") or c.get("venue") or "", "doi": c.get("doi", ""),
@@ -98,9 +111,11 @@ class Library:
 
     def find(self, ident: str) -> Optional[Dict]:
         ident = ident.strip().lower().removeprefix("https://doi.org/").removeprefix("doi:").removeprefix("arxiv:")
+        if not ident:
+            return None
         for m in self.papers():
-            if ident in (m["id"].lower(), str(m.get("doi") or "").lower(),
-                         str(m.get("arxiv_id") or "").lower(), str(m.get("pdf_filename") or "").lower().removesuffix(".pdf")):
+            keys = (m["id"], m.get("doi"), m.get("arxiv_id"), str(m.get("pdf_filename") or "").removesuffix(".pdf"))
+            if ident in [str(k).lower() for k in keys if k]:
                 return m
         return None
 
@@ -109,8 +124,8 @@ class Library:
         scored = []
         for m in self.papers():
             title = str(m.get("title", "")).lower()
-            authors = " ".join(m.get("authors") or []).lower() if isinstance(m.get("authors"), list) else str(m.get("authors", "")).lower()
-            kws = " ".join(m.get("keywords") or []).lower() if isinstance(m.get("keywords"), list) else str(m.get("keywords", "")).lower()
+            authors = " ".join(_names(m.get("authors"))).lower()
+            kws = " ".join(_names(m.get("keywords"))).lower()
             body = str(m.get("summary", "")).lower()
             s = sum(3 * (w in title) + 2 * (w in kws) + 2 * (w in authors) + (w in body) for w in words)
             if s:
