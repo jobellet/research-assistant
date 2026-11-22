@@ -42,7 +42,7 @@ PUBLIC_URL=$(grep -oE "https://[a-zA-Z0-9.-]+\.lhr\.life" slurm_logs/lhr_url_$SL
 
 if [ -n "$PUBLIC_URL" ]; then
     echo "Research Assistant Tunnel: $PUBLIC_URL"
-    python "$NOTIFY_SCRIPT" "🔬 *Research Assistant Online*: $PUBLIC_URL/ui (Login: joachim)"
+    python "$NOTIFY_SCRIPT" "🔬 *Research Assistant Online*: $PUBLIC_URL/ui (Login: your AUTH_TOKEN)"
 
     # Update SERVER_ACCESS.md
     cat << EOL > "$REPO_DIR/SERVER_ACCESS.md"

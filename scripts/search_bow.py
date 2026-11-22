@@ -6,7 +6,7 @@ from pathlib import Path
 
 def main():
     parser = argparse.ArgumentParser(description="Quickly search the Bag of Words index")
-    parser.add_argument("query", nargs="+", help="Keywords to search for (e.g. 'fMRI', 'siegel', '2019')")
+    parser.add_argument("query", nargs="+", help="Keywords to search for (e.g. 'fMRI', 'macaque', '2019')")
     parser.add_argument("--top_k", type=int, default=10, help="Number of results to return")
     args = parser.parse_args()
 

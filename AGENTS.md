@@ -38,7 +38,7 @@
 ### Current Limitations
 - **Offline Metadata Fallback**: Needs Crossref network connectivity or an active LLM worker endpoint to populate metadata for non-standard PDFs without DOIs.
 - **Single-User Editing**: The LaTeX editor supports single-user sessions; multi-user real-time collaborative editing (like OT/CRDTs) is not implemented.
-- **Hardcoded Cluster Paths**: Some background scripts (`run_embedding_watcher.sh`, `sync_my_ai_research.sh`) have hardcoded paths for specific HPC cluster environments (`/gpfs01/siegel/...`).
+- **Hardcoded Cluster Paths**: Some background scripts (`run_embedding_watcher.sh`, `sync_my_ai_research.sh`) have hardcoded paths for specific HPC cluster environments (`/gpfs01/<lab>/...`).
 - **Preprint / Manual PDF Handling**: Unindexed technical reports without DOIs require manual `metadata.json` editing or fallback keyword headers.
 
 ### Targeted Future Aims
@@ -55,11 +55,11 @@ The following scripts/functions are obsolete, contain hardcoded personal environ
 | Script / Function | Issue Type | Details | Status / Fix Applied |
 | :--- | :--- | :--- | :--- |
 | **`scripts/build_graph.py`** | **Import Error (Fixed)** | Line 16 imported non-existent `ingest_module.database_manager`. | **RESOLVED**: Updated import to `from db_module.db_manager import DBManager`. |
-| **`patch_years.py`** | **Hardcoded Path (Fixed)** | Line 57 used hardcoded path `/Users/marieschmidt/.../library`. | **RESOLVED**: Replaced with `from config import LIBRARY_DIR`. |
-| **`update_chroma.py`** | **Hardcoded Path (Fixed)** | Line 12 used hardcoded path `/Users/marieschmidt/.../library`. | **RESOLVED**: Replaced with `from config import LIBRARY_DIR`. |
+| **`patch_years.py`** | **Hardcoded Path (Fixed)** | Line 57 used hardcoded path `/Users/<name>/.../library`. | **RESOLVED**: Replaced with `from config import LIBRARY_DIR`. |
+| **`update_chroma.py`** | **Hardcoded Path (Fixed)** | Line 12 used hardcoded path `/Users/<name>/.../library`. | **RESOLVED**: Replaced with `from config import LIBRARY_DIR`. |
 | **`db_module/vector_db.py`** & **`db_module/indexer.py`** | **Schema Keys (Fixed)** | Legacy implementation using uppercase metadata keys (`Title`, `Summary`). | **RESOLVED**: Updated to support both lowercase (`title`, `summary`, `keywords`) and legacy uppercase keys matching `DBManager`. |
-| **`scripts/run_embedding_watcher.sh`** | **Cluster Path (Fixed)** | Referenced `/gpfs01/siegel/.../embedding_watcher.py`. | **RESOLVED**: Updated to execute `windows_worker.py` relative to repo root. |
-| **`scripts/sync_my_ai_research.sh`** | **Cluster Path (Fixed)** | Hardcoded `/gpfs01/siegel/.../my-ai-research-assistant`. | **RESOLVED**: Updated with relative `SCRIPT_DIR` fallback resolution. |
+| **`scripts/run_embedding_watcher.sh`** | **Cluster Path (Fixed)** | Referenced `/gpfs01/<lab>/.../embedding_watcher.py`. | **RESOLVED**: Updated to execute `windows_worker.py` relative to repo root. |
+| **`scripts/sync_my_ai_research.sh`** | **Cluster Path (Fixed)** | Hardcoded `/gpfs01/<lab>/.../my-ai-research-assistant`. | **RESOLVED**: Updated with relative `SCRIPT_DIR` fallback resolution. |
 
 ---
 

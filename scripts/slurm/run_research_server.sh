@@ -8,8 +8,8 @@
 #SBATCH --time=5-00:00:00
 
 # Load environment
-REPO_DIR="/gpfs01/siegel/user/jbellet/my-ai-research-assistant"
-PYTHON_EXE="/gpfs01/siegel/user/jbellet/envs/ai_research_env/bin/python3"
+REPO_DIR="${REPO_DIR:-$HOME/research-assistant}"   # set REPO_DIR to your clone
+PYTHON_EXE="${PYTHON_EXE:-python3}"   # or the Python of your environment
 export PYTHONPATH="$REPO_DIR:$PYTHONPATH"
 
 echo "$(date): Starting My AI Research Assistant Server..."
