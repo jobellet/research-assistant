@@ -74,6 +74,7 @@ Open your browser and navigate to:
 - 🔍 **Highlight-to-Search**: Select any sentence, hypothesis, or paragraph in your LaTeX draft to search your local library with semantic vector search or Bag-of-Words keyword matching (selected per query, not combined).
 - 📌 **1-Click BibTeX Injection**: Click **Cite** on any paper to add a clean BibTeX entry (authors, year, DOI, journal or arXiv eprint; no duplicates) to the project's `references.bib` and get its `\cite{key}`.
 - 💬 **Ask Your Library**: Questions answered from your own papers, with citations, using any AI provider with an API key (OpenAI, Gemini, Claude, Mistral, Groq, OpenRouter) or a local Ollama server — no cluster needed.
+- 🔌 **MCP server**: let Gemini (or any MCP client) search the literature and, optionally, your private library, read-only, through a Cloudflare tunnel. See [docs/mcp.md](docs/mcp.md).
 - 📱 **Laptop ↔ Phone**: Projects sync through a private Google Drive app folder; the same page on GitHub Pages works on a phone without the server (write, browse and cite the library, search online). See [docs/sync-and-ai.md](docs/sync-and-ai.md).
 - 🌐 **Literature Discovery**: Search arXiv, OpenAlex, Semantic Scholar and Crossref at once, find papers related to a library paper or to a highlighted passage, see which results you already have, and download open-access PDFs into the library.
 - 🕸️ **Interactive Semantic Knowledge Graph**: Explore literature clusters in 2D using UMAP embeddings and visualize citation connections powered by Semantic Scholar.

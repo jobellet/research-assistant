@@ -320,3 +320,6 @@ FastAPI microservice running on port 8002 serving `/generate` requests for GPU w
 #### [`scripts/verify_cleaning.py`](scripts/verify_cleaning.py)
 - `normalize_text(text: str)` -> `str`: Standardizes quotes, ligatures, dashes, and whitespace.
 - `verify_folder(ground_truth_dir, library_dir)` -> `bool`: Asserts whether ground truth text snippets exist within preprocessed text files.
+
+## MCP module
+`mcp_module/server.py` is a standalone MCP server (JSON-RPC over POST `/mcp/<secret>`), run with `python -m mcp_module [--mode discovery|library] [--tunnel]`. It reads only `library/*/metadata.json`, never PDFs or full texts. Tests: `tests/test_mcp.py`. Docs: `docs/mcp.md`.

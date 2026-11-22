@@ -36,3 +36,4 @@ Thumbs.db
 
 # AI provider settings (contain an API key)
 ai_settings.json
+mcp_secret.txt
