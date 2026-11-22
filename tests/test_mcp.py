@@ -45,7 +45,7 @@ def test_discover_papers_truncates_and_shapes(lib):
 def test_library_tools_are_read_only_metadata(lib):
     s = McpServer("library", lib)
     names = {t["name"] for t in s.handle(rpc("tools/list"))["result"]["tools"]}
-    assert names == {"discover_papers", "search_library", "get_paper", "cite"}
+    assert names == {"discover_papers", "search_library", "get_paper", "cite", "check_in_library"}
     hits = json.loads(s.handle(rpc("tools/call", {"name": "search_library", "arguments": {"query": "consciousness language"}}))["result"]["content"][0]["text"])
     assert [h["id"] for h in hits] == ["h1"]
     got = s.handle(rpc("tools/call", {"name": "get_paper", "arguments": {"id": "10.1/x"}}))["result"]["content"][0]["text"]
@@ -96,3 +96,102 @@ def test_odd_metadata_shapes_and_empty_id(tmp_path):
     assert hit[0]["authors"] == ["A B", "C D"]
     for ident in ("", "  "):
         assert s.handle(rpc("tools/call", {"name": "cite", "arguments": {"id": ident}}))["result"]["isError"]
+
+
+class FakeApp:
+    """Records calls to the local app and returns canned answers."""
+
+    def __init__(self):
+        self.calls = []
+        self.draft = "\\section{A}"
+
+    def get(self, path, params=None):
+        self.calls.append(("GET", path, params))
+        if path.endswith("/draft"):
+            return {"content": self.draft}
+        if path.startswith("/api/library/text/"):
+            return {"text": "abcdefghij" * 500}
+        return {"ok": True}
+
+    def post(self, path, body):
+        self.calls.append(("POST", path, body))
+        if path == "/api/search":
+            return [{"hash_id": "h1", "score": 0.9, "metadata": {"title": "Neural correlates of consciousness in language models"},
+                     "summary": "s1"},
+                    {"hash_id": "h2", "score": 0.5, "metadata": {"title": "Birds of Europe"}, "summary": "s2"}]
+        return {"status": "downloaded", "title": "T"}
+
+    def put(self, path, body):
+        self.calls.append(("PUT", path, body))
+        self.draft = body["content"]
+        return {"status": "saved"}
+
+
+def call(s, tool, **args):
+    r = s.handle(rpc("tools/call", {"name": tool, "arguments": args}))["result"]
+    return r.get("isError", False), r["content"][0]["text"]
+
+
+def test_full_mode_lists_tools_with_write_annotations(lib):
+    s = McpServer("full", lib, app=FakeApp())
+    tools = {t["name"]: t for t in s.handle(rpc("tools/list"))["result"]["tools"]}
+    assert {"check_in_library", "add_to_library", "similar_papers", "semantic_search", "read_paper_text",
+            "append_to_draft", "add_citation"} <= set(tools)
+    assert tools["similar_papers"]["annotations"]["readOnlyHint"] is True
+    assert tools["add_to_library"]["annotations"]["readOnlyHint"] is False
+    assert not any("delete" in n for n in tools)
+
+
+def test_full_tools_not_reachable_in_lower_modes(lib):
+    for mode in ("discovery", "library"):
+        s = McpServer(mode, lib, app=FakeApp())
+        for name in ("add_to_library", "append_to_draft", "similar_papers"):
+            err, _ = call(s, name, identifier="10.1/x", text="x", id="h1")
+            assert err
+
+
+def test_check_in_library_exact_and_near(lib):
+    app = FakeApp()
+    s = McpServer("full", lib, app=app)
+    err, out = call(s, "check_in_library", doi="https://doi.org/10.1/X")
+    data = json.loads(out)
+    assert not err and data["in_library"] and data["match"]["id"] == "h1"
+    err, out = call(s, "check_in_library", title="Something else entirely", text="an abstract")
+    data = json.loads(out)
+    assert not data["in_library"] and data["closest_by_meaning"][0]["id"] == "h1"
+
+
+def test_similar_papers_excludes_itself_and_add_to_library_uses_app(lib):
+    app = FakeApp()
+    s = McpServer("full", lib, app=app)
+    _, out = call(s, "similar_papers", id="h1", n=5)
+    assert [p["id"] for p in json.loads(out)] == ["h2"]
+    _, out = call(s, "add_to_library", identifier="arxiv:2305.17375")
+    assert json.loads(out)["status"] == "downloaded"
+    assert ("POST", "/api/discover/fetch", {"identifier": "arxiv:2305.17375", "process": True}) in app.calls
+
+
+def test_read_text_chunks_and_append_never_replaces(lib):
+    app = FakeApp()
+    s = McpServer("full", lib, app=app)
+    _, out = call(s, "read_paper_text", id="h1", offset=0, max_chars=1000)
+    d = json.loads(out)
+    assert len(d["text"]) == 1000 and d["next_offset"] == 1000 and d["total_chars"] == 5000
+    call(s, "append_to_draft", project="default", text="\\section{B}")
+    assert app.draft.startswith("\\section{A}") and app.draft.rstrip().endswith("\\section{B}")
+
+
+def test_invalid_project_names_refused(lib):
+    s = McpServer("full", lib, app=FakeApp())
+    for bad in ("../x", ".hidden", "a/b", ""):
+        err, _ = call(s, "append_to_draft", project=bad or "/", text="x")
+        assert err
+    err, _ = call(s, "create_project", name="../evil")
+    assert err
+
+
+def test_app_down_gives_a_clear_error(lib):
+    from mcp_module.app_client import AppClient
+    s = McpServer("full", lib, app=AppClient("http://127.0.0.1:9", "t", timeout=2))
+    err, msg = call(s, "library_stats")
+    assert err and "not reachable" in msg

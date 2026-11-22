@@ -1,4 +1,4 @@
-"""Run: python -m mcp_module [--mode discovery|library] [--port 8765] [--tunnel]
+"""Run: python -m mcp_module [--mode discovery|library|full] [--port 8765] [--tunnel]
 
 Prints the URL to paste into Gemini (Settings > Connectors > Custom). With --tunnel it starts a
 free Cloudflare quick tunnel (needs `cloudflared`) and prints the public https URL.
@@ -30,17 +30,31 @@ def get_secret() -> str:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--mode", choices=["discovery", "library"], default="discovery")
+    ap.add_argument("--mode", choices=["discovery", "library", "full"], default="discovery")
     ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--app-url", default=os.environ.get("APP_URL", "http://127.0.0.1:8000"), help="local web app (full mode)")
     ap.add_argument("--tunnel", action="store_true", help="open a Cloudflare quick tunnel and print the public URL")
     a = ap.parse_args()
     secret = get_secret()
-    app = create_app(secret, a.mode, config.LIBRARY_DIR)
+    client = None
+    if a.mode == "full":
+        from mcp_module.app_client import AppClient, AppError
+        token = os.environ.get("SERVER_PASSWORD") or os.environ.get("API_KEY") or os.environ.get("AUTH_TOKEN") or ""
+        client = AppClient(a.app_url, token)
+        try:
+            client.get("/api/library/export")
+            print(f"Connected to the research-assistant app at {a.app_url}", flush=True)
+        except AppError as e:
+            print(f"WARNING: {e}\nThe server starts anyway; app tools will fail until the app runs.", flush=True)
+    app = create_app(secret, a.mode, config.LIBRARY_DIR, app_client=client)
     path = f"/mcp/{secret}"
     print(f"MCP server, mode '{a.mode}', local: http://127.0.0.1:{a.port}{path}", flush=True)
     if a.mode == "library":
         print("WARNING: library mode shares titles, authors and abstracts of your private library with "
               "whoever holds the URL and with the assistant. Stop it when you are done.", flush=True)
+    if a.mode == "full":
+        print("WARNING: full mode shares your library (abstracts and full texts) with the assistant, and lets it add "
+              "papers and edit your projects (it never deletes). Anyone with the URL can do the same. Stop it when done.", flush=True)
     if a.tunnel:
         def run_tunnel():
             p = subprocess.Popen([shutil.which("cloudflared") or str(Path.home() / "bin" / "cloudflared"), "tunnel", "--no-autoupdate", "--url", f"http://127.0.0.1:{a.port}"],

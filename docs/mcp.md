@@ -12,6 +12,7 @@ no hosting and no Cloudflare account.
 - [4. Try it](#4-try-it)
 - [5. Share your library (optional)](#5-share-your-library-optional)
 - [Stop, restart, and what changes each time](#stop-restart-and-what-changes-each-time)
+- [Full mode: your whole research assistant in Gemini](#full-mode-your-whole-research-assistant-in-gemini)
 - [Privacy and safety](#privacy-and-safety)
 - [Troubleshooting](#troubleshooting)
 - [Options: permanent address, other clients](#options-permanent-address-other-clients)
@@ -34,7 +35,8 @@ Gemini (Google) ──https──> Cloudflare relay ──tunnel──> cloudfla
 | Mode | Tools | What leaves your computer |
 |---|---|---|
 | `discovery` (default) | `discover_papers` (OpenAlex, arXiv, Crossref, Semantic Scholar) | nothing private: it only queries public databases |
-| `library` | adds `search_library`, `get_paper`, `cite` | titles, authors, abstracts, keywords and BibTeX of the papers the assistant asks for. No PDFs, no full text |
+| `library` | adds `search_library`, `get_paper`, `cite`, `check_in_library` | titles, authors, abstracts, keywords and BibTeX of the papers the assistant asks for. No PDFs, no full text |
+| `full` | adds the tools of the web app: semantic search, similar papers, full texts, adding papers, projects (see [all tools](#all-tools-full-mode)) | abstracts **and full texts** of the papers it asks for. It can also add papers and write to your projects (never delete) |
 
 ## What you need
 
@@ -118,6 +120,57 @@ What Gemini receives is only what it asks for: titles, authors, year, journal, D
 receives PDFs or full texts. Still, it is your private collection: use library mode only when you need it and stop it
 afterwards.
 
+## Full mode: your whole research assistant in Gemini
+
+Full mode connects Gemini to the local web app, so it can do what the web page does. Two programs run on your computer:
+the app (it holds the embedding model and the database) and the MCP server, which is the only one exposed through the tunnel
+and talks to the app with your `AUTH_TOKEN` (the token never goes to Gemini).
+
+```bash
+./launch.command                                  # terminal 1: the web app (or your usual way to start it)
+python -m mcp_module --mode full --tunnel         # terminal 2: prints the address for Gemini
+```
+
+Then, in Gemini (Connectors → + Custom, address as above; remove an older Research Assistant first), try:
+
+> I give you this paper: https://arxiv.org/abs/2308.08708. Is it already in my library? If not, add it.
+> (a minute later) Which papers in my library are the most similar to it? Which ones argue against its position?
+> Add the three most relevant to the project "review" and append a short paragraph to the draft.
+
+How "contradict" works: the server finds the semantically closest papers (`similar_papers`, `semantic_search`) and gives
+Gemini their abstracts and full texts (`get_paper`, `read_paper_text`); Gemini does the reading and the judgement.
+
+Notes:
+- To hand Gemini an article, give a **DOI, an arXiv id or link, or the title**. A PDF attached to the chat is not
+  transmitted to the tools. `add_to_library` downloads the *open-access* PDF; if there is none it says so, and you can drop the
+  PDF in `inbox/` yourself.
+- Indexing a new paper takes about a minute: Gemini can poll `processing_status`.
+- Gemini asks for confirmation before tools that write (`add_to_library`, `add_citation`, `create_project`,
+  `append_to_draft`). `append_to_draft` only appends; no tool deletes or overwrites anything.
+
+### All tools (full mode)
+
+| Tool | What it does | Writes? |
+|---|---|---|
+| `discover_papers` | search OpenAlex, arXiv, Crossref, Semantic Scholar | no |
+| `check_in_library` | is this paper (DOI / arXiv / title / abstract) in the library? plus the closest ones by meaning | no |
+| `add_to_library` | download an open-access paper by arXiv id / URL / DOI and process it | **adds a PDF** |
+| `processing_status` | state of the background processing | no |
+| `search_library` | word search in titles, authors, abstracts, keywords | no |
+| `semantic_search` | search by meaning, with year / author / journal filters | no |
+| `similar_papers` | the papers most similar to one library paper | no |
+| `get_paper`, `cite` | metadata and abstract; BibTeX | no |
+| `read_paper_text` | extracted full text, in chunks | no |
+| `related_online` | papers outside the library related to a library paper | no |
+| `literature_for_text` | literature relevant to a manuscript passage | no |
+| `graph_neighbors` | 50 nearest neighbours by word usage | no |
+| `audit_claims` | check manuscript claims against an analysis text | no |
+| `library_stats` | size and processing state of the library | no |
+| `list_projects`, `get_draft`, `get_bib` | your projects | no |
+| `add_citation` | add a library paper to a project's BibTeX | **edits `references.bib`** |
+| `create_project` | create a project | **adds a folder** |
+| `append_to_draft` | append LaTeX to the end of a draft | **edits `draft.tex`** |
+
 ## Stop, restart, and what changes each time
 
 - **Stop**: `Ctrl-C` in the terminal. The tunnel and the address disappear immediately.
@@ -135,6 +188,9 @@ afterwards.
   says so in its `instructions`, but treat the assistant's actions accordingly.
 - Limits: 60 tool calls per minute, requests above 100 KB are refused, a wrong path answers a bare 404, and no tool writes or
   downloads anything.
+- **Full mode** gives whoever holds the address the same power as the assistant: reading your library's full texts and
+  adding papers or editing your projects (no deletion). Use it only while you work with the assistant, and stop it afterwards.
+  If the address leaks, stop the server and delete `mcp_secret.txt`.
 - Never commit `mcp_secret.txt` or `.env` (both are in `.gitignore`).
 
 ## Troubleshooting
@@ -148,7 +204,8 @@ afterwards.
 | The tunnel prints no address | check your internet connection, and try again in a minute: quick tunnels can be rate limited |
 | Gemini does not use the tool | name the app and the tool in your request |
 | "Rate limit reached" | more than 60 calls in a minute; wait |
-| Library tools missing | start with `--mode library` and re-add the custom app |
+| Library tools missing | start with `--mode library` (or `full`) and re-add the custom app |
+| "the research-assistant app is not reachable" (full mode) | start the web app first; if it is not on port 8000, use `--app-url http://127.0.0.1:PORT`; `AUTH_TOKEN` must be set in `.env` |
 
 You can test the server without Gemini:
 

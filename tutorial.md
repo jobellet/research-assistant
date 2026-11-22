@@ -340,9 +340,9 @@ Set-up (Google OAuth Client ID, GitHub Pages) and conflict handling:
 
 ## 15. Use it from Gemini (MCP)
 
-Gemini can call your research assistant as a tool: literature search, and optionally your own library.
+Gemini can call your research assistant as a tool: literature search, and optionally your own library (is this paper already in my library? add it; which papers are similar or argue against it?).
 A small separate server (`python -m mcp_module --tunnel`) and a free Cloudflare quick tunnel (no account) make it reachable;
-the code runs on your computer. Read-only; the default mode never touches your library.
+the code runs on your computer. The default mode never touches your library; the `full` mode can read it and add papers.
 
 ```bash
 python -m mcp_module --tunnel      # prints an https://….trycloudflare.com/mcp/<secret> address

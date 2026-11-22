@@ -8,7 +8,9 @@ Modes (``--mode``):
 * ``discovery`` (default): ``discover_papers`` only. It queries public scholarly databases
   and never reads your library: nothing private can leak.
 * ``library``: adds read-only tools over your own library (titles, authors, abstracts,
-  keywords, BibTeX). No PDFs and no full text.
+  keywords, BibTeX, "is this paper already in my library?"). No PDFs and no full text.
+* ``full``: also uses the local web app: semantic search, similar papers, full texts, adding a
+  paper to the library, citations and drafts of your projects. Some tools write (never delete).
 
 The URL carries a long random secret (``/mcp/<secret>``), because the remote assistant may
 not be able to send a token. Run ``python -m mcp_module`` (see ``docs/mcp.md``).
@@ -149,17 +151,37 @@ def bibtex_for(meta: Dict) -> str:
 
 
 class McpServer:
-    def __init__(self, mode: str = "discovery", library_dir: Optional[Path] = None, searcher=None):
-        if mode not in ("discovery", "library"):
-            raise ValueError("mode must be 'discovery' or 'library'")
+    def __init__(self, mode: str = "discovery", library_dir: Optional[Path] = None, searcher=None, app=None):
+        if mode not in ("discovery", "library", "full"):
+            raise ValueError("mode must be 'discovery', 'library' or 'full'")
         self.mode = mode
-        self.library = Library(library_dir) if mode == "library" and library_dir else None
+        self.library = Library(library_dir) if mode in ("library", "full") and library_dir else None
+        self.app = app if mode == "full" else None
         self._searcher = searcher
+        self._full = None
         self._calls: List[float] = []
 
     # -- tools ---------------------------------------------------------------
+    def _full_tools(self):
+        if self._full is None:
+            from mcp_module import tools_full
+            self._full = (tools_full, tools_full.make_handlers(self))
+        return self._full
+
     def tools(self) -> List[Dict]:
-        return [DISCOVER_TOOL] + (LIBRARY_TOOLS if self.mode == "library" else [])
+        out = [DISCOVER_TOOL] + (LIBRARY_TOOLS if self.mode in ("library", "full") else [])
+        if self.mode == "library":   # metadata-only duplicate check, no app needed
+            tf, _ = self._full_tools()
+            out.append(self._spec("check_in_library", tf))
+        if self.mode == "full":
+            tf, _ = self._full_tools()
+            out += [self._spec(n, tf) for n in tf.SPECS]
+        return out
+
+    @staticmethod
+    def _spec(name, tf):
+        desc, schema, ann = tf.SPECS[name]
+        return {"name": name, "description": desc, "inputSchema": schema, "annotations": ann}
 
     def _rate_ok(self) -> bool:
         now = time.time()
@@ -186,6 +208,10 @@ class McpServer:
             return json.dumps([_short(c) for c in res], ensure_ascii=False)
         if self.library is None:
             raise ValueError(f"unknown tool {name}")
+        if self.mode == "full" or (self.mode == "library" and name == "check_in_library"):
+            _, handlers = self._full_tools()
+            if name in handlers:
+                return handlers[name](args)
         if name == "search_library":
             query = str(args.get("query", "")).strip()
             limit = max(1, min(int(args.get("limit") or 10), MAX_RESULTS))
@@ -235,7 +261,7 @@ class McpServer:
         return err(-32601, f"Method not found: {method}")
 
 
-def create_app(secret: str, mode: str = "discovery", library_dir: Optional[Path] = None, searcher=None):
+def create_app(secret: str, mode: str = "discovery", library_dir: Optional[Path] = None, searcher=None, app_client=None):
     """Starlette app: POST /mcp/<secret>. Anything else is a bare 404."""
     from starlette.applications import Starlette
     from starlette.requests import Request
@@ -244,7 +270,7 @@ def create_app(secret: str, mode: str = "discovery", library_dir: Optional[Path]
 
     if len(secret) < 24:
         raise ValueError("the secret must be at least 24 characters")
-    server = McpServer(mode, library_dir, searcher)
+    server = McpServer(mode, library_dir, searcher, app_client)
 
     async def endpoint(request: Request):
         if not hmac.compare_digest(request.path_params["secret"], secret):

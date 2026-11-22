@@ -322,4 +322,4 @@ FastAPI microservice running on port 8002 serving `/generate` requests for GPU w
 - `verify_folder(ground_truth_dir, library_dir)` -> `bool`: Asserts whether ground truth text snippets exist within preprocessed text files.
 
 ## MCP module
-`mcp_module/server.py` is a standalone MCP server (JSON-RPC over POST `/mcp/<secret>`), run with `python -m mcp_module [--mode discovery|library] [--tunnel]`. It reads only `library/*/metadata.json`, never PDFs or full texts. Tests: `tests/test_mcp.py`. Docs: `docs/mcp.md`.
+`mcp_module/server.py` is a standalone MCP server (modes `discovery`, `library`, `full`; `full` adds `tools_full.py`, which calls the local app through `app_client.py` with the server-side `AUTH_TOKEN`) (JSON-RPC over POST `/mcp/<secret>`), run with `python -m mcp_module [--mode discovery|library|full] [--tunnel]`. It reads only `library/*/metadata.json`, never PDFs or full texts. Tests: `tests/test_mcp.py`. Docs: `docs/mcp.md`.
