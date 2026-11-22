@@ -27,7 +27,8 @@ All screenshots and animations were captured from the running application.
 12. [Statistics page and mobile use](#12-statistics-page-and-mobile-use)
 13. [Ask your library (AI provider)](#13-ask-your-library-ai-provider)
 14. [Laptop and phone: Google Drive sync](#14-laptop-and-phone-google-drive-sync)
-15. [Command-line reference and troubleshooting](#15-command-line-reference-and-troubleshooting)
+15. [Use it from Gemini (MCP)](#15-use-it-from-gemini-mcp)
+16. [Command-line reference and troubleshooting](#16-command-line-reference-and-troubleshooting)
 
 ---
 
@@ -337,7 +338,20 @@ search, Ask and the graph need the computer.
 Set-up (Google OAuth Client ID, GitHub Pages) and conflict handling:
 [docs/sync-and-ai.md](docs/sync-and-ai.md#google-drive-sync).
 
-## 15. Command-line reference and troubleshooting
+## 15. Use it from Gemini (MCP)
+
+Gemini can call your research assistant as a tool: literature search, and optionally your own library.
+A small separate server (`python -m mcp_module --tunnel`) and a free Cloudflare quick tunnel (no account) make it reachable;
+the code runs on your computer. Read-only; the default mode never touches your library.
+
+```bash
+python -m mcp_module --tunnel      # prints an https://….trycloudflare.com/mcp/<secret> address
+```
+
+Paste that address in Gemini: **Connectors → + Custom → Next → Connect**. Full step-by-step guide, library mode, privacy
+notes and troubleshooting: [docs/mcp.md](docs/mcp.md).
+
+## 16. Command-line reference and troubleshooting
 
 | Command | Purpose |
 |---|---|
