@@ -21,7 +21,7 @@ the project needs papers (see [Zotero projects](zotero-projects.md)).
    (`SERVER_PASSWORD` in `.env`) and click **Save and connect**.
 
 After a `git pull` that changes the extension, click the ↻ button of the extension
-in `chrome://extensions`.
+in `chrome://extensions`, then reload the Google Docs tab.
 
 ## Check a claim
 
@@ -71,7 +71,8 @@ missing citations. The report is also saved in the project (`citation_audit.json
   and it uses the Google account the Doc is open in (`/u/1/` links included).
 - Permissions: `sidePanel`, `storage` (server address and password, kept in this
   browser only), `scripting` and `activeTab` (read the selection of the tab you are
-  using), `contextMenus`, `clipboardRead` (only for *Check copied text*), and access
+  using), `contextMenus`, `clipboardWrite` (to ask Google Docs to copy the selection),
+  `clipboardRead` (only for *Check copied text*), and access
   to `docs.google.com`, `127.0.0.1` and `localhost`. The extension rejects any server
   that is not on this computer.
 

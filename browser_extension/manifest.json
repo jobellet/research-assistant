@@ -1,18 +1,44 @@
 {
   "manifest_version": 3,
   "name": "Research Assistant: check citations",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Check the claims and citations of a Google Doc (or any page) against the papers of a project of your local research-assistant server.",
-  "action": { "default_title": "Research Assistant: check citations" },
-  "side_panel": { "default_path": "sidepanel.html" },
-  "background": { "service_worker": "background.js", "type": "module" },
-  "permissions": ["sidePanel", "storage", "scripting", "activeTab", "contextMenus", "clipboardRead"],
-  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*", "https://docs.google.com/*"],
+  "action": {
+    "default_title": "Research Assistant: check citations"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "sidePanel",
+    "storage",
+    "scripting",
+    "activeTab",
+    "contextMenus",
+    "clipboardRead",
+    "clipboardWrite"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "http://localhost/*",
+    "https://docs.google.com/*"
+  ],
   "commands": {
     "check-selection": {
-      "suggested_key": { "default": "Alt+Shift+K", "mac": "Alt+Shift+K" },
+      "suggested_key": {
+        "default": "Alt+Shift+K",
+        "mac": "Alt+Shift+K"
+      },
       "description": "Check the selected claim against the project's papers"
     }
   },
-  "icons": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
 }
