@@ -14,7 +14,16 @@ import re
 import unicodedata
 from typing import Dict, List, Optional
 
-_DOI = re.compile(r"\b10\.\d{4,9}/[^\s;,)\]>]+", re.I)
+_DOI = re.compile(r"\b10\.\d{4,9}/[^\s;,\]>]+", re.I)
+
+
+def _trim_doi(doi: str) -> str:
+    """Drop trailing punctuation, and closing parentheses that have no opening one in the DOI
+    ('10.1016/S0042-6989(03)00084-1' keeps its parentheses; '(doi 10.1/abc)' loses the ')')."""
+    doi = doi.rstrip(".,;:]}>")
+    while doi.endswith(")") and doi.count(")") > doi.count("("):
+        doi = doi[:-1].rstrip(".,;:]}>")
+    return doi
 
 # Lower-case name particles that may precede a capitalised family name ('van Dijk', 'de Vries').
 _PARTICLES = {"van", "von", "de", "der", "den", "da", "del", "della", "di", "du", "dos",
@@ -41,7 +50,7 @@ def _norm_doi(doi: str) -> str:
     doi = re.sub(r"^(?:https?://)?(?:dx\.)?doi\.org/", "", doi)
     doi = re.sub(r"^doi:\s*", "", doi)
     m = _DOI.search(doi)
-    return m.group(0).rstrip(".,;:)]}>") if m else ""
+    return _trim_doi(m.group(0)) if m else ""
 
 
 def _core_surname(name: str) -> str:

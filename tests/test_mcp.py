@@ -228,3 +228,42 @@ def test_check_claim_and_project_references(lib):
     call(s, "project_references", project="My paper")
     assert app.calls[-1][1] == "/api/projects/My%20paper/refs"
     assert call(s, "project_references", project="../x")[0] is True
+
+
+def test_audit_citations_tool(lib):
+    app = FakeApp()
+    state = {"job": {"running": False}, "report": None}
+    app.get = lambda path, params=None: (app.calls.append(("GET", path, params)), state)[1]
+    app.post = lambda path, body: (app.calls.append(("POST", path, body)), {"job": {"running": True}})[1]
+    s = McpServer("full", lib, app=app)
+    err, text = call(s, "audit_citations", project="p")
+    assert not err and json.loads(text)["status"] == "started"
+    assert app.calls[-1][1] == "/api/projects/p/citation-audit" and app.calls[-1][2]["check_dois"] is True
+    state["job"] = {"running": True, "done": 3, "total": 9}
+    assert json.loads(call(s, "audit_citations", project="p")[1])["status"] == "running"
+    state["job"] = {"running": False}
+    state["report"] = {"summary": {"citing_sentences": 12}, "citations": [{"sentence_index": i} for i in range(12)],
+                       "references": [{"n": "1", "in_project": "h", "cited_in": [0], "doi_check": {"status": "ok"}},
+                                      {"n": "2", "in_project": None, "cited_in": [1]}],
+                       "possibly_missing": []}
+    out = json.loads(call(s, "audit_citations", project="p", limit=5)[1])
+    assert len(out["citations"]) == 5 and out["next_offset"] == 5
+    assert [r["n"] for r in out["reference_problems"]] == ["2"]
+    out = json.loads(call(s, "audit_citations", project="p", offset=10, limit=5)[1])
+    assert len(out["citations"]) == 2 and out["next_offset"] is None and "reference_problems" not in out
+
+
+def test_audit_citations_page_is_valid_json_even_when_large(lib):
+    app = FakeApp()
+    big = "x" * 3000
+    cit = {"sentence_index": 0, "sentence": "s", "parts": [{"claim": "c", "cites": "1", "refs": [
+        {"status": "in_project", "title": "T", "best_sentences": [{"text": big, "page": 1, "similarity": 0.5,
+                                                                    "before": big, "after": big}] * 3}]}]}
+    state = {"job": {"running": False}, "report": {"summary": {}, "citations": [dict(cit, sentence_index=i) for i in range(30)],
+                                                   "references": [], "possibly_missing": []}}
+    app.get = lambda path, params=None: state
+    s = McpServer("full", lib, app=app)
+    err, text = call(s, "audit_citations", project="p", limit=30)
+    out = json.loads(text)                       # never truncated into invalid JSON
+    assert out["citations"] and out["next_offset"] == len(out["citations"])
+    assert "before" not in out["citations"][0]["parts"][0]["refs"][0]["best_sentences"][0]

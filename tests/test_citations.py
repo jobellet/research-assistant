@@ -127,3 +127,13 @@ def test_title_match_needs_year_or_author_and_skips_commentaries():
 def test_title_match_without_year_or_author_metadata_still_works():
     r = CitationResolver([P("m", "", "", title="Spatial coding of feature alpha in area X of the monkey")], DRAFT)
     assert r.resolve("4")["papers"] == ["m"]
+
+
+def test_dois_with_parentheses_are_kept_whole():
+    from project_module.citations import _norm_doi, parse_numbered_references
+    assert _norm_doi("https://doi.org/10.1016/S0042-6989(03)00084-1.") == "10.1016/s0042-6989(03)00084-1"
+    assert _norm_doi("(doi: 10.5555/abc.1)") == "10.5555/abc.1"
+    refs = parse_numbered_references("References\n1. A, B. (2003). Title one here. J. 1. https://doi.org/10.1016/S0042-6989(03)00084-1\n"
+                                     "2. C, D. (2004). Title two here. J. 2. (https://doi.org/10.5555/x.2)\n"
+                                     "3. E, F. (2005). Title three here. J. 3. https://doi.org/10.5555/x.3\n")
+    assert refs["1"]["doi"] == "10.1016/s0042-6989(03)00084-1" and refs["2"]["doi"] == "10.5555/x.2"

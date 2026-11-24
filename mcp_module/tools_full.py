@@ -97,6 +97,20 @@ SPECS: Dict[str, Any] = {
         _schema({"project": PROJECT, "text": _s("string", "The claim (one or a few sentences of the manuscript)"),
                  "per_paper": _s("integer", "Sentences per paper (default 3, max 6)", minimum=1, maximum=6)},
                 ["text"]), READ),
+    "audit_citations": (
+        "Check ALL citations of a project's draft automatically. For every citing sentence and every cited part of it, "
+        "returns the best-matching sentences of the cited paper (page numbers), flags citations whose reference is not "
+        "in the project, citation numbers without a reference entry, references never cited, DOIs that Crossref does "
+        "not know or whose record does not match the reference, parts where ANOTHER project paper matches better, and "
+        "uncited sentences that closely match a project paper (possibly missing citations). The first call starts the "
+        "audit (a few minutes); call again to get the report, page through it with offset/limit. Then judge each "
+        "citation from the sentences: supported, inaccurate (the paper says something different), or unsupported.",
+        _schema({"project": PROJECT,
+                 "refresh": _s("boolean", "Start a new audit even if a report exists (default false)"),
+                 "check_dois": _s("boolean", "Look the DOIs up in Crossref (default true)"),
+                 "offset": _s("integer", "First citing sentence to return (default 0)", minimum=0),
+                 "limit": _s("integer", "Citing sentences per call (default 10, max 30)", minimum=1, maximum=30)}, []),
+        READ_WEB),
     "sync_project_zotero": (
         "Bring a project's papers up to date with its linked Zotero collection (copies new PDFs into the library, "
         "indexes them, adds BibTeX entries). Runs in the background: see project_references.",
@@ -143,6 +157,27 @@ def _evidence_summary(r: Dict) -> Dict:
     if r.get("not_indexed"):
         out["note"] = f"{len(r['not_indexed'])} paper(s) are still being indexed (word matches only for them)."
     return out
+
+
+def _compact_citation(c: Dict) -> Dict:
+    """A citing sentence of the audit report without the context sentences, texts shortened."""
+    def ref(r):
+        r = dict(r)
+        if "best_sentences" in r:
+            r["best_sentences"] = [{"page": x.get("page"), "similarity": x.get("similarity"),
+                                    "text": (x.get("text") or "")[:400]} for x in r["best_sentences"]]
+        if r.get("reference"):
+            r["reference"] = r["reference"][:200]
+        return r
+    parts = []
+    for p in c.get("parts", []):
+        q = {"claim": p.get("claim"), "cites": p.get("cites"), "refs": [ref(r) for r in p.get("refs", [])]}
+        if p.get("better_match_elsewhere"):
+            b = p["better_match_elsewhere"]
+            q["better_match_elsewhere"] = {k: (b.get(k) or "")[:400] if k == "text" else b.get(k)
+                                           for k in ("title", "authors", "year", "page", "similarity", "text")}
+        parts.append(q)
+    return {"sentence_index": c.get("sentence_index"), "sentence": c.get("sentence"), "parts": parts}
 
 
 def make_handlers(server) -> Dict[str, Callable[[Dict], str]]:
@@ -253,6 +288,36 @@ def make_handlers(server) -> Dict[str, Callable[[Dict], str]]:
         app().put(f"/api/projects/{quote(proj, safe='')}/draft", {"content": old + sep + text + ("" if text.endswith("\n") else "\n")})
         return json.dumps({"status": "appended", "project": proj, "added_chars": len(text)})
 
+    def audit_citations(args):
+        proj = _pq(args)
+        state = app().get(f"/api/projects/{proj}/citation-audit")
+        job, report = state.get("job") or {}, state.get("report")
+        if job.get("running"):
+            return json.dumps({"status": "running", "progress": f"{job.get('done', 0)}/{job.get('total', 0)}",
+                               "hint": "call again in a minute"})
+        if args.get("refresh") or not report:
+            started = app().post(f"/api/projects/{proj}/citation-audit",
+                                 {"check_dois": args.get("check_dois", True) is not False})
+            return json.dumps({"status": "started", "job": started.get("job"),
+                               "hint": "the audit takes a few minutes; call again without refresh"})
+        off = max(0, int(args.get("offset") or 0))
+        lim = max(1, min(int(args.get("limit") or 10), 30))
+        cits = [_compact_citation(c) for c in report.get("citations", [])]
+        while True:   # shrink the page until it fits (a truncated answer would be invalid JSON)
+            out = {"summary": report.get("summary"), "note": report.get("note"),
+                   "citations": cits[off:off + lim], "next_offset": off + lim if off + lim < len(cits) else None}
+            if lim == 1 or len(json.dumps(out, ensure_ascii=False)) < MAX_TEXT // 2:
+                break
+            lim = max(1, lim // 2)
+        if off == 0:
+            out["reference_problems"] = [r for r in report.get("references", [])
+                                         if not r.get("in_project") or not r.get("cited_in")
+                                         or r.get("doi_differs_from_library")
+                                         or (r.get("doi_check") or {}).get("status") not in (None, "ok")]
+            out["possibly_missing"] = report.get("possibly_missing", [])
+            out["not_indexed"] = report.get("not_indexed", [])
+        return _clip(out)
+
     def check_claim(args):
         text = str(args.get("text", "")).strip()
         if not text:
@@ -276,5 +341,6 @@ def make_handlers(server) -> Dict[str, Callable[[Dict], str]]:
         "append_to_draft": append,
         "project_references": lambda a: _clip(app().get(f"/api/projects/{_pq(a)}/refs")),
         "check_claim": check_claim,
+        "audit_citations": audit_citations,
         "sync_project_zotero": lambda a: _clip(app().post(f"/api/projects/{_pq(a)}/sync", {})),
     }

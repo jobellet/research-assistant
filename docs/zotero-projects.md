@@ -112,6 +112,29 @@ Area X"*. Read the matched sentences.
 one-line reason. This sends the claim and the shown sentences (not the PDFs) to
 that provider; nothing is sent unless you click the button.
 
+## 5. Audit all citations of the draft
+
+`POST /api/projects/<project>/citation-audit` (or the MCP tool `audit_citations`)
+goes through the whole draft in the background (a few minutes) and saves a report in
+`projects/<project>/citation_audit.json`:
+
+- for every sentence that cites something, and every cited part of it, the best
+  sentences of each cited paper with their page numbers;
+- references that are not among the project's papers (not checkable: add them to
+  the Zotero collection with their PDF), citation numbers without a reference
+  entry, and references never cited;
+- every DOI of the numbered reference list looked up in Crossref: unknown DOIs,
+  and DOIs whose Crossref record has another title, first author or year. A DOI
+  that differs from the one in your library is flagged too;
+- parts where another project paper matches the claim better than the cited one;
+- uncited sentences that closely match a project paper (possible missing citations;
+  many are false alarms, for example in Methods).
+
+The audit collects evidence; it does not decide. An assistant connected through MCP
+(Gemini, Claude…) can read the report and judge each citation: supported,
+inaccurate (the paper says something different) or unsupported. The DOI check sends
+the DOIs of your reference list to Crossref; nothing else leaves your computer.
+
 ## How the sentence search works
 
 - Each PDF is read page by page. Running headers and footers, download stamps,

@@ -555,3 +555,55 @@ def import_docx(name: str, req: DocxRequest):
         raise HTTPException(status_code=400, detail="This is not a Word (.docx) file.")
     text = "\n\n".join(p.text for p in doc.paragraphs if p.text.strip())[:MAX_DOCX_TEXT]
     return {"text": text, "paragraphs": text.count("\n\n") + 1 if text else 0}
+
+
+# ---------------------------------------------------------------------------
+# Citation audit of the whole draft (background job; result kept in the project)
+# ---------------------------------------------------------------------------
+AUDIT_FILE = "citation_audit.json"
+
+
+class AuditRequest(BaseModel):
+    check_dois: bool = True          # looks the reference list's DOIs up in Crossref
+    suggest_missing: bool = True     # uncited sentences that closely match a project paper
+
+
+@router.post("/api/projects/{name}/citation-audit")
+def start_citation_audit(name: str, req: AuditRequest):
+    """Check every citation of the project's draft against the project's papers, and the
+    DOIs of its numbered reference list against Crossref. Poll GET for the result."""
+    refs = _refs(name)
+    project = refs.dir.name
+    draft_path = refs.dir / "draft.tex"
+    if not draft_path.exists() or not draft_path.read_text(errors="ignore").strip():
+        raise HTTPException(status_code=400, detail="The project's draft is empty.")
+    enc = get_encoder()
+
+    def target(progress):
+        from audit_module.citation_audit import run_audit
+        papers = refs.load()["papers"]
+        draft = draft_path.read_text(errors="ignore")
+        _resolver_cache.pop(str(refs.dir), None)
+        resolver = _resolver(refs.dir, papers)
+        report = run_audit(draft, resolver.papers, enc, _ctx["library_dir"], resolver,
+                           check_dois=req.check_dois, suggest_missing=req.suggest_missing,
+                           progress=progress)
+        report["created"] = int(time.time())
+        report["not_indexed"] = [p["hash_id"] for p in papers
+                                 if not (_ctx["library_dir"] / p["hash_id"] / "passages.json").exists()]
+        tmp = refs.dir / (AUDIT_FILE + ".tmp")
+        tmp.write_text(json.dumps(report, ensure_ascii=False))
+        tmp.replace(refs.dir / AUDIT_FILE)
+        return report["summary"]
+    return {"job": _start_job(f"audit:{project}", target, "audit")}
+
+
+@router.get("/api/projects/{name}/citation-audit")
+def get_citation_audit(name: str):
+    refs = _refs(name)
+    job = _job_state(f"audit:{refs.dir.name}")
+    try:
+        report = json.loads((refs.dir / AUDIT_FILE).read_text())
+    except (OSError, ValueError):
+        report = None
+    return {"job": job, "report": report}
