@@ -78,7 +78,7 @@ const newProjectModal = document.getElementById("new-project-modal");
 const newProjectName = document.getElementById("new-project-name");
 const btnCreateProject = document.getElementById("btn-create-project");
 const btnCancelProject = document.getElementById("btn-cancel-project");
-const fileListItems = document.querySelectorAll("#file-list .nav-item");
+const fileListItems = document.querySelectorAll("#file-list .nav-item[data-file]");
 
 // Chat & Library UI Elements
 const tabLibrary = document.getElementById("tab-library");
@@ -450,6 +450,12 @@ async function switchProject(name, guardUnsaved = true) {
   state.activeProject = name;
   localStorage.setItem("activeProject", name);
   await loadCurrentFile();
+  if (state.serverMode && window.ProjectRefsUI) window.ProjectRefsUI.onProjectChanged(name);
+}
+
+// The project whose papers scope library, search and graph (null = whole library)
+function scopedProject() {
+  return window.ProjectRefsUI ? window.ProjectRefsUI.scopedProject() : null;
 }
 
 async function loadCurrentFile() {
@@ -589,7 +595,11 @@ function handleInput(e) {
 
 function handleHighlight() {
   if (state.activeFile !== "draft" || !state.serverMode) return;
-  const selectedText = window.getSelection().toString().trim();
+  // Text selected inside the textarea is not part of window.getSelection() in every browser
+  const inEditor = document.activeElement === editor && editor.selectionEnd > editor.selectionStart;
+  const selectedText = (inEditor
+    ? editor.value.substring(editor.selectionStart, editor.selectionEnd)
+    : window.getSelection().toString()).trim();
   if (selectedText.length > 10) {
     state.lastSelection = selectedText;
     // Prevent searching for the exact same text constantly
@@ -644,11 +654,14 @@ function switchView(view) {
 // =============================================================================
 
 async function performSemanticSearch(query) {
+  // Sentences of the project's own references that match the claim
+  if (window.ProjectRefsUI) window.ProjectRefsUI.findEvidence(query);
   try {
+    const project = scopedProject();
     const response = await fetch(`${CONFIG.API_BASE}/api/search`, {
       method: "POST",
       headers: authHeaders(),
-      body: JSON.stringify({ query: query, n_results: 3 }),
+      body: JSON.stringify({ query: query, n_results: project ? 5 : 3, project }),
     });
     if (!response.ok) throw new Error("Search failed");
     const results = await response.json();
@@ -672,15 +685,22 @@ async function performSemanticSearch(query) {
 }
 
 async function loadLibrary() {
+  // Only the latest request may render: an older (e.g. unscoped, slower) response
+  // must not replace the list of a newer scope.
+  const seq = (state.librarySeq = (state.librarySeq || 0) + 1);
   try {
-    const res = await fetch(`${CONFIG.API_BASE}/api/library`, {
-      headers: authHeaders(),
-    });
+    const project = scopedProject();
+    const res = await fetch(
+      `${CONFIG.API_BASE}/api/library${project ? "?project=" + encodeURIComponent(project) : ""}`,
+      { headers: authHeaders() },
+    );
     if (!res.ok) throw new Error("Failed to load library");
     const data = await res.json();
+    if (seq !== state.librarySeq) return;
     state.libraryData = data.papers || [];
     renderLibrary(state.libraryData);
   } catch (e) {
+    if (seq !== state.librarySeq) return;
     console.error("Library Load Error:", e);
     if (libraryList) {
       libraryList.innerHTML =
@@ -757,6 +777,7 @@ async function handleLibrarySearch(e) {
         if (fYear) payload.year = parseInt(fYear);
         if (fAuthor) payload.author = fAuthor;
         if (fJournal) payload.journal = fJournal;
+        if (scopedProject()) payload.project = scopedProject();
 
         const response = await fetch(`${CONFIG.API_BASE}/api/search`, {
           method: "POST",
@@ -783,6 +804,56 @@ async function handleLibrarySearch(e) {
     }, 500);
   }
 }
+
+// =============================================================================
+// PAPER CARDS (library + matches)
+// =============================================================================
+
+// Paper metadata (titles, authors, file names) comes from PDFs and Zotero, so it is
+// escaped before going into HTML, and the buttons carry their arguments in data-*
+// attributes handled by one delegated listener (no inline onclick strings).
+function escHtml(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+
+function fileButtonsHtml(hash_id, files) {
+  if (!files || !files.length) return "";
+  return files
+    .map((f, idx) => {
+      const name = String(f.filename || "");
+      let label = idx === 0 ? "PDF" : `Supp ${idx}`;
+      const lowerName = name.toLowerCase();
+      if (lowerName.includes("supp")) label = "Supp";
+      if (lowerName.includes("fig")) label = "Figs";
+      return `<button class="view-btn" data-paper-action="pdf" data-hash="${escHtml(hash_id)}" data-file="${escHtml(name)}" title="${escHtml(name)}">${label}</button>`;
+    })
+    .join("");
+}
+
+// The action buttons of a card. bibIdPrefix keeps the ids addToBib() looks up.
+function paperActionsHtml(hash_id, title, files, bibIdPrefix) {
+  const h = escHtml(hash_id);
+  return `<button class="view-btn" style="background: var(--accent-color); color: white;" data-paper-action="graph" data-hash="${h}">Quick Graph</button>
+                    ${fileButtonsHtml(hash_id, files)}
+                    <button class="view-btn" data-paper-action="text" data-hash="${h}" data-title="${escHtml(title)}">Text</button>
+                    <button class="view-btn" data-paper-action="related" data-hash="${h}" title="Find related papers online">Related</button>
+                    <button class="view-btn" id="${bibIdPrefix}${h}" data-paper-action="cite" data-hash="${h}" style="background: #3b82f6">Cite</button>`;
+}
+
+function onPaperAction(e) {
+  const b = e.target.closest && e.target.closest("button[data-paper-action]");
+  if (!b) return;
+  const hash = b.dataset.hash;
+  switch (b.dataset.paperAction) {
+    case "pdf": window.openPDF(hash, b.dataset.file || ""); break;
+    case "graph": window.openQuickGraph(hash); break;
+    case "text": window.openRawText(hash, b.dataset.title || ""); break;
+    case "related": if (typeof window.discoverRelated === "function") window.discoverRelated(hash); break;
+    case "cite": window.addToBib(hash); break;
+  }
+}
+document.addEventListener("click", onPaperAction);
 
 function renderLibrary(papers, limit = 50) {
   if (!libraryList) return;
@@ -833,34 +904,13 @@ function renderLibrary(papers, limit = 50) {
     const keywords =
       keywordList.length > 0 ? keywordList.slice(0, 3).join(", ") : "";
 
-    const filename = p.metadata.pdf_filename || "";
-
-    // Generate buttons for all available files (Main + Supplements)
-    let fileButtons = "";
-    if (p.files && p.files.length > 0) {
-      fileButtons = p.files
-        .map((f, idx) => {
-          let label = idx === 0 ? "PDF" : `Supp ${idx}`;
-          const lowerName = f.filename.toLowerCase();
-          if (lowerName.includes("supp")) label = "Supp";
-          if (lowerName.includes("fig")) label = "Figs";
-
-          return `<button class="view-btn" onclick="openPDF('${p.hash_id}', '${f.filename}')" title="${f.filename}">${label}</button>`;
-        })
-        .join("");
-    }
-
     card.innerHTML = `
-            <div class="result-title" style="font-size: 0.95rem; margin-bottom: 0.25rem;">${title}</div>
-            ${authors ? `<div style="font-size: 0.8rem; color: var(--accent-color); margin-bottom: 0.5rem;">${authors}</div>` : ""}
-            ${keywords ? `<div style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 0.75rem;">🏷 ${keywords}</div>` : ""}
+            <div class="result-title" style="font-size: 0.95rem; margin-bottom: 0.25rem;">${escHtml(title)}</div>
+            ${authors ? `<div style="font-size: 0.8rem; color: var(--accent-color); margin-bottom: 0.5rem;">${escHtml(authors)}</div>` : ""}
+            ${keywords ? `<div style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 0.75rem;">🏷 ${escHtml(keywords)}</div>` : ""}
             <div class="result-footer" style="justify-content: flex-end;">
                 <div style="display: flex; gap: 0.3rem; flex-wrap: wrap; justify-content: flex-end;">
-                    <button class="view-btn" style="background: var(--accent-color); color: white;" onclick="openQuickGraph('${p.hash_id}')">Quick Graph</button>
-                    ${fileButtons}
-                    <button class="view-btn" onclick="openRawText('${p.hash_id}', '${title.replace(/'/g, "\\'")}')">Text</button>
-                    <button class="view-btn" onclick="discoverRelated('${p.hash_id}')" title="Find related papers online">Related</button>
-                    <button class="view-btn" id="bib-btn-lib-${p.hash_id}" onclick="addToBib('${p.hash_id}')" style="background: #3b82f6">Cite</button>
+                    ${paperActionsHtml(p.hash_id, title, p.files, "bib-btn-lib-")}
                 </div>
             </div>
         `;
@@ -908,9 +958,11 @@ window.openRawText = async (hash_id, title) => {
 };
 
 function renderResults(results) {
-  resultsContainer.innerHTML = "";
+  // Paper-level matches go below the sentence-level evidence, if that section exists
+  const target = document.getElementById("paper-matches") || resultsContainer;
+  target.innerHTML = "";
   if (!results || results.length === 0) {
-    resultsContainer.innerHTML = `
+    target.innerHTML = `
       <div class="empty-state" style="text-align: center; padding: 2rem 1rem;">
         <div style="font-size: 2rem; margin-bottom: 1rem;" aria-hidden="true">🔍</div>
         <div class="text-secondary" style="margin-bottom: 0.5rem; font-weight: 500;">No matches found</div>
@@ -927,36 +979,17 @@ function renderResults(results) {
     const summary = res.summary || "";
     const score = Math.round(res.score * 100);
 
-    // Generate buttons for all available files (Main + Supplements)
-    let fileButtons = "";
-    if (res.files && res.files.length > 0) {
-      fileButtons = res.files
-        .map((f, idx) => {
-          let label = idx === 0 ? "PDF" : `Supp ${idx}`;
-          const lowerName = f.filename.toLowerCase();
-          if (lowerName.includes("supp")) label = "Supp";
-          if (lowerName.includes("fig")) label = "Figs";
-
-          return `<button class="view-btn" onclick="openPDF('${res.hash_id}', '${f.filename}')" title="${f.filename}">${label}</button>`;
-        })
-        .join("");
-    }
-
     card.innerHTML = `
-            <div class="result-title">${title}</div>
-            <div class="result-summary">${summary}</div>
+            <div class="result-title">${escHtml(title)}</div>
+            <div class="result-summary">${escHtml(summary)}</div>
             <div class="result-footer">
                 <span class="score-badge">${score}% Match</span>
                 <div style="display: flex; gap: 0.3rem; flex-wrap: wrap; justify-content: flex-end;">
-                    <button class="view-btn" style="background: var(--accent-color); color: white;" onclick="openQuickGraph('${res.hash_id}')">Quick Graph</button>
-                    ${fileButtons}
-                    <button class="view-btn" onclick="openRawText('${res.hash_id}', '${title.replace(/'/g, "\\'")}')">Text</button>
-                    <button class="view-btn" onclick="discoverRelated('${res.hash_id}')" title="Find related papers online">Related</button>
-                    <button class="view-btn" id="bib-btn-${res.hash_id}" onclick="addToBib('${res.hash_id}')" style="background: #3b82f6">Cite</button>
+                    ${paperActionsHtml(res.hash_id, title, res.files, "bib-btn-")}
                 </div>
             </div>
         `;
-    resultsContainer.appendChild(card);
+    target.appendChild(card);
   });
 }
 
@@ -1062,9 +1095,13 @@ window.addToBib = async (hash_id) => {
 
 async function loadGraph() {
   try {
-    const response = await fetch(`${CONFIG.API_BASE}/api/graph`, {
-      headers: authHeaders(),
-    });
+    const project = scopedProject();
+    const response = await fetch(
+      project
+        ? `${CONFIG.API_BASE}/api/graph/semantic?project=${encodeURIComponent(project)}`
+        : `${CONFIG.API_BASE}/api/graph`,
+      { headers: authHeaders() },
+    );
     const data = await response.json();
     renderGraph(data);
   } catch (e) {
@@ -1081,7 +1118,7 @@ function renderGraph(data) {
     '<div id="graph-canvas-container" style="position:relative; width:100%; height:100%; overflow:hidden;">' +
     '<div id="graph-canvas" style="width:100%; height:100%;"></div>' +
     '<div class="graph-controls" style="position:absolute; top:10px; right:10px; display:flex; gap:10px;">' +
-    `<button class="view-btn" style="background: var(--accent-color); color: white;" onclick="window.location.href='/ui/graph.html?token=${CONFIG.AUTH_TOKEN}'">Advanced Explorer →</button>` +
+    `<button class="view-btn" style="background: var(--accent-color); color: white;" onclick="window.location.href='/ui/graph.html?token=${CONFIG.AUTH_TOKEN}${scopedProject() ? "&project=" + encodeURIComponent(scopedProject()).replace(/'/g, "%27") : ""}'">Advanced Explorer →</button>` +
     "</div></div>";
 
   const canvas = document.getElementById("graph-canvas");

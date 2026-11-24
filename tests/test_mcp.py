@@ -195,3 +195,36 @@ def test_app_down_gives_a_clear_error(lib):
     s = McpServer("full", lib, app=AppClient("http://127.0.0.1:9", "t", timeout=2))
     err, msg = call(s, "library_stats")
     assert err and "not reachable" in msg
+
+
+def test_check_claim_and_project_references(lib):
+    app = FakeApp()
+    evidence = {
+        "claim": "Area X has sparse inner coverage, growth bands.",
+        "papers": [], "top": [], "not_indexed": ["h9"], "unresolved": [],
+        "parts": [{"claim": "sparse inner coverage", "cites": "32",
+                   "unresolved": [{"label": "9", "reference": "Okafor, P. (1992). The updating..."}],
+                   "papers": [{"hash_id": "h1", "title": "Representation of the river delta", "authors": "van Dijk et al.",
+                               "year": "2001", "bib_key": "vandijk2001", "cited": True, "best_score": 0.6,
+                               "passages": [{"text": "Overrepresentation of the inner lagoon in Area X.", "page": 9,
+                                             "similarity": 0.65, "before": "", "after": "We calculated..."}]}]}],
+    }
+    app.post = lambda path, body: (app.calls.append(("POST", path, body)), evidence)[1]
+    s = McpServer("full", lib, app=app)
+    tools = {t["name"]: t for t in s.handle(rpc("tools/list"))["result"]["tools"]}
+    assert tools["check_claim"]["annotations"]["readOnlyHint"] is True
+    assert tools["sync_project_zotero"]["annotations"]["readOnlyHint"] is False
+    err, text = call(s, "check_claim", project="My paper", text="Area X has sparse inner coverage,32")
+    assert not err
+    method, path, body = app.calls[-1]
+    assert path == "/api/projects/My%20paper/evidence" and body["per_paper"] == 3
+    out = json.loads(text)
+    part = out["cited_parts"][0]
+    assert part["cites"] == "32" and part["papers"][0]["cited"] is True
+    assert part["papers"][0]["sentences"][0]["page"] == 9
+    assert part["not_in_project"][0].startswith("9: Okafor")
+    assert "still being indexed" in out["note"]
+    assert call(s, "check_claim", text="   ")[0] is True
+    call(s, "project_references", project="My paper")
+    assert app.calls[-1][1] == "/api/projects/My%20paper/refs"
+    assert call(s, "project_references", project="../x")[0] is True

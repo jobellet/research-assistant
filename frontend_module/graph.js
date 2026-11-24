@@ -261,14 +261,18 @@ async function loadGraph(forceRebuild = false) {
   setStatus("Loading graph…", "building");
 
   try {
-    let data = await apiFetch("/api/graph/semantic");
+    const graphProject = new URLSearchParams(window.location.search).get("project");
+    const graphUrl = graphProject
+      ? `/api/graph/semantic?project=${encodeURIComponent(graphProject)}`
+      : "/api/graph/semantic";
+    let data = await apiFetch(graphUrl);
 
     // If the server is still building, poll until ready
     let retries = 0;
     while (data.status === "building" && retries < 30) {
       setStatus("Graph building on server… retry in 5s", "building");
       await sleep(5000);
-      data = await apiFetch("/api/graph/semantic");
+      data = await apiFetch(graphUrl);
       retries++;
     }
 

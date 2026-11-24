@@ -44,6 +44,7 @@ from graph_module.neighbor_graph import build_neighbor_graph_bow
 from audit_module.claim_auditor import audit_claims
 from config import LIBRARY_DIR, EXTERNAL_LIBRARY_PATH, BOW_INDEX_PATH, CHROMA_DB_PATH, DATA_DIR
 from discovery_module import discover as discovery
+from server_module import refs_api
 import re
 import subprocess
 import threading
@@ -92,6 +93,7 @@ class QueryRequest(BaseModel):
     year: Optional[int] = None
     author: Optional[str] = None
     journal: Optional[str] = None
+    project: Optional[str] = None   # search only this project's papers
 
 class ProjectCreateRequest(BaseModel):
     name: str
@@ -185,6 +187,16 @@ The system is configured to group supplements and main papers by DOI. You can ch
     except Exception as e:
         logger.error(f"Failed to update access file: {e}")
 
+# --- Project reference lists (Zotero collections, sentence-level evidence) ---
+refs_api.configure(
+    project_path=lambda name: get_project_path(name),
+    get_searcher=lambda: searcher,
+    library_dir=LIBRARY_DIR,
+    on_library_changed=lambda: _on_library_changed(),
+    add_citation=lambda project, hash_id: _add_to_bib(project, hash_id),
+)
+app.include_router(refs_api.router)
+
 # --- Lifecycle Management ---
 
 @app.on_event("startup")
@@ -252,6 +264,12 @@ def _on_library_changed():
         CITATION_GRAPH_PATH.unlink(missing_ok=True)
     except Exception as e:
         logger.warning(f"Could not reset citation cache: {e}")
+    # project graphs are cached per project: drop them so they show the new papers/metadata
+    try:
+        for cache in PROJECTS_DIR.glob("*/graph_cache.json"):
+            cache.unlink(missing_ok=True)
+    except Exception as e:
+        logger.warning(f"Could not reset project graph caches: {e}")
     if searcher:
         threading.Thread(target=_background_build_graph, args=(True,), daemon=True).start()
 
@@ -432,12 +450,14 @@ def _library_entry(hash_dir: Path, meta: dict) -> dict:
 
 
 @app.get("/api/library", dependencies=[Depends(verify_auth_token)])
-def get_library():
-    """All papers of the library (read from each paper's metadata.json), newest year first."""
+def get_library(project: Optional[str] = None):
+    """All papers of the library (read from each paper's metadata.json), newest year first.
+    With ``project``, only the papers of that project."""
     papers = []
+    scope = set(refs_api.project_hash_ids(project)) if project else None
     if LIBRARY_DIR.exists():
         for hash_dir in LIBRARY_DIR.iterdir():
-            if not hash_dir.is_dir():
+            if not hash_dir.is_dir() or (scope is not None and hash_dir.name not in scope):
                 continue
             meta = _read_metadata(hash_dir)
             if meta:
@@ -764,8 +784,10 @@ def _passes_filters(metadata: dict, author: Optional[str], journal: Optional[str
 
 def _run_search(request: "QueryRequest", year: Optional[int], author: Optional[str], journal: Optional[str]) -> list:
     """One search pass. Year is filtered in ChromaDB; author/journal are substring
-    filters applied afterwards (ChromaDB has no substring operator on metadata)."""
+    filters applied afterwards (ChromaDB has no substring operator on metadata).
+    With ``request.project`` only that project's papers are searched."""
     where = {"year": year} if year else None
+    scope = set(refs_api.project_hash_ids(request.project)) if request.project else None
     post_filter = bool(author or journal)
     fetch_n = request.n_results * 5 if post_filter else request.n_results
     try:
@@ -776,9 +798,12 @@ def _run_search(request: "QueryRequest", year: Optional[int], author: Optional[s
     if request.method == "bow":
         if not bow_searcher:
             raise HTTPException(status_code=500, detail="BOW search engine not available.")
-        hits = bow_searcher.search(request.query, top_k=max(fetch_n, request.n_results * 5))
+        hits = bow_searcher.search(request.query, top_k=max(fetch_n, request.n_results * 5)
+                                   if scope is None else 100000)
         enriched = []
         for res in hits:
+            if scope is not None and res["hash_id"] not in scope:
+                continue
             get_kwargs = {"ids": [res["hash_id"]], "include": ["metadatas", "documents"]}
             if where:
                 get_kwargs["where"] = where
@@ -796,7 +821,8 @@ def _run_search(request: "QueryRequest", year: Optional[int], author: Optional[s
             })
         results = enriched
     else:
-        results = searcher.search(request.query, n_results=fetch_n, where=where)
+        results = searcher.search(request.query, n_results=fetch_n, where=where,
+                                  ids=sorted(scope) if scope is not None else None)
 
     if post_filter:
         results = [r for r in results if _passes_filters(r.get("metadata") or {}, author, journal)]
@@ -975,10 +1001,19 @@ class FocusRequest(BaseModel):
     paper_ids: List[str]
 
 @app.get("/api/graph/semantic", dependencies=[Depends(verify_auth_token)])
-def get_semantic_graph():
-    """Return UMAP-projected semantic graph (nodes + k-NN edges + clusters + gaps)."""
+def get_semantic_graph(project: Optional[str] = None):
+    """Return UMAP-projected semantic graph (nodes + k-NN edges + clusters + gaps).
+    With ``project``, a graph of that project's papers only (built on demand, cached
+    in the project folder until its paper list changes)."""
     if not searcher:
         raise HTTPException(status_code=500, detail="Searcher not initialized.")
+    if project:
+        ids = refs_api.project_hash_ids(project)
+        try:
+            return build_semantic_graph(searcher.db_manager, ids=ids,
+                                        cache_path=get_project_path(project) / "graph_cache.json")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
     global _graph_cache
     if _graph_forced:
         return {"status": "building", "message": "Graph is being rebuilt. Please retry in a few seconds.",
@@ -1132,32 +1167,43 @@ def save_bib(name: str, req: DraftSaveRequest):
     _write_project_file(project_path / "references.bib", req.content, req.updated_at)
     return {"status": "saved", "name": name, "updated_at": _mtime_ms(project_path / "references.bib")}
 
+def _add_to_bib(project_name: str, hash_id: str) -> str:
+    """Add a library paper to a project's references.bib; returns its BibTeX key."""
+    project_path = ensure_project_exists(project_name)
+    metadata = {}
+    if searcher:
+        data = searcher.db_manager.collection.get(ids=[hash_id], include=["metadatas"])
+        if data["ids"]:
+            metadata = dict(data["metadatas"][0] or {})
+    # metadata.json has the richest information (author list, arXiv id, journal)
+    file_meta = _read_metadata(LIBRARY_DIR / hash_id) if re.fullmatch(r"[A-Za-z0-9_-]+", hash_id) else None
+    if file_meta:
+        metadata.update({k: v for k, v in file_meta.items() if v})
+    if not metadata:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    metadata["hash"] = hash_id
+    return CitationManager(bib_path=str(project_path / "references.bib")).add_entry(metadata)
+
+
 @app.post("/api/citation/add", dependencies=[Depends(verify_auth_token)])
 def add_citation(request: CitationAddRequest):
-    """Add a paper to a specific project's BibTeX file."""
+    """Add a paper to a project's BibTeX file and to its reference list."""
     hash_id = request.hash_id
     project_name = request.project or "default"
 
     if not hash_id or not searcher:
         raise HTTPException(status_code=400, detail="Invalid request")
-
-    project_path = ensure_project_exists(project_name)
-    bib_path = project_path / "references.bib"
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", hash_id):
+        raise HTTPException(status_code=400, detail="Invalid paper id.")
 
     try:
-        data = searcher.db_manager.collection.get(ids=[hash_id], include=["metadatas", "documents"])
-        if not data["ids"]:
-            raise HTTPException(status_code=404, detail="Paper not found")
-
-        metadata = dict(data["metadatas"][0] or {})
-        # metadata.json has the richest information (author list, arXiv id, journal)
-        file_meta = _read_metadata(LIBRARY_DIR / hash_id) if re.fullmatch(r"[A-Za-z0-9_-]+", hash_id) else None
-        if file_meta:
-            metadata.update({k: v for k, v in file_meta.items() if v})
-        metadata["hash"] = hash_id
-
-        cm = CitationManager(bib_path=str(bib_path))
-        bib_key = cm.add_entry(metadata)
+        bib_key = _add_to_bib(project_name, hash_id)
+        try:
+            from project_module import ProjectRefs
+            ProjectRefs(get_project_path(project_name)).add_paper(
+                hash_id, _read_metadata(LIBRARY_DIR / hash_id) or {}, bib_key)
+        except Exception as e:
+            logger.warning(f"Could not add {hash_id} to the reference list of {project_name}: {e}")
         return {"status": "success", "bib_key": bib_key, "project": project_name}
     except HTTPException:
         raise

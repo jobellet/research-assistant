@@ -57,9 +57,13 @@ def _save_cache(data: dict):
 # Core graph builder
 # ---------------------------------------------------------------------------
 
-def build_semantic_graph(db_manager, k_neighbors: int = 10, force_rebuild: bool = False) -> dict:
+def build_semantic_graph(db_manager, k_neighbors: int = 10, force_rebuild: bool = False,
+                         ids: Optional[list] = None, cache_path: Optional[Path] = None) -> dict:
     """
     Build or load a cached semantic graph.
+
+    With ``ids`` the graph contains only those papers (a project's); it is then
+    cached in ``cache_path`` and rebuilt whenever the list of papers changes.
 
     Returns a dict with:
         nodes: [{id, title, authors, year, x, y, cluster, degree}]
@@ -67,7 +71,29 @@ def build_semantic_graph(db_manager, k_neighbors: int = 10, force_rebuild: bool 
         clusters: [{id, label, color, count}]
         stats: {n_nodes, n_edges, built_at}
     """
-    if not force_rebuild and _cache_is_fresh():
+    subset = list(ids) if ids is not None else None   # 'ids' is reused below for ChromaDB ids
+    subset_key = None
+    if subset is not None:
+        import hashlib
+        # Key on the papers actually in ChromaDB, not on the requested list: a project
+        # paper indexed after the graph was cached must trigger a rebuild.
+        found = []
+        if subset:
+            try:
+                found = db_manager.collection.get(ids=list(dict.fromkeys(subset)), include=[])["ids"]
+            except Exception as e:
+                logger.warning(f"Could not look up the project's papers in ChromaDB: {e}")
+                found = []
+        subset = list(found)
+        subset_key = hashlib.sha256("\n".join(sorted(set(subset))).encode()).hexdigest()[:16]
+        if not force_rebuild and cache_path and Path(cache_path).exists():
+            try:
+                cached = json.loads(Path(cache_path).read_text())
+                if cached.get("stats", {}).get("subset_key") == subset_key:
+                    return cached
+            except Exception:
+                pass
+    elif not force_rebuild and _cache_is_fresh():
         cached = _load_cache()
         if cached:
             logger.info("Returning cached graph.")
@@ -81,8 +107,12 @@ def build_semantic_graph(db_manager, k_neighbors: int = 10, force_rebuild: bool 
     collection = db_manager.collection
     try:
         all_ids = collection.get(include=[])["ids"]
+        if subset is not None:
+            wanted = set(subset)
+            all_ids = [i for i in all_ids if i in wanted]
         if not all_ids:
-            return {"nodes": [], "edges": [], "clusters": [], "stats": {"n_nodes": 0, "n_edges": 0}}
+            return {"nodes": [], "edges": [], "clusters": [], "gaps": [],
+                    "stats": {"n_nodes": 0, "n_edges": 0, "subset_key": subset_key}}
         result = collection.get(ids=all_ids, include=["embeddings", "metadatas", "documents"])
     except Exception as e:
         logger.error(f"Failed to query ChromaDB: {e}")
@@ -107,6 +137,8 @@ def build_semantic_graph(db_manager, k_neighbors: int = 10, force_rebuild: bool 
     # ------------------------------------------------------------------
     logger.info("Running UMAP…")
     try:
+        if n < 5:
+            raise ValueError("too few papers for UMAP")
         import umap
         reducer = umap.UMAP(
             n_components=2,
@@ -119,9 +151,11 @@ def build_semantic_graph(db_manager, k_neighbors: int = 10, force_rebuild: bool 
         coords_2d = reducer.fit_transform(emb_matrix)
     except Exception as e:
         logger.warning(f"UMAP failed ({e}), using PCA fallback.")
-        from sklearn.decomposition import PCA
-        pca = PCA(n_components=2)
-        coords_2d = pca.fit_transform(emb_matrix)
+        if n >= 3:
+            from sklearn.decomposition import PCA
+            coords_2d = PCA(n_components=2).fit_transform(emb_matrix)
+        else:   # one or two papers: side by side
+            coords_2d = np.array([[float(i), 0.0] for i in range(n)], dtype=np.float32)
 
     # Normalise to [-1, 1]
     for dim in range(2):
@@ -135,6 +169,8 @@ def build_semantic_graph(db_manager, k_neighbors: int = 10, force_rebuild: bool 
     # ------------------------------------------------------------------
     logger.info("Detecting communities…")
     try:
+        if n < 6:
+            raise ValueError("too few papers to cluster")
         import hdbscan
         clusterer = hdbscan.HDBSCAN(
             min_cluster_size=max(3, n // 40),
@@ -275,7 +311,11 @@ def build_semantic_graph(db_manager, k_neighbors: int = 10, force_rebuild: bool 
     # ------------------------------------------------------------------
     # 8. Structural hole detection
     # ------------------------------------------------------------------
-    gaps = _detect_structural_holes(nodes, edges, unique_labels, emb_matrix, ids)
+    try:
+        gaps = _detect_structural_holes(nodes, edges, unique_labels, emb_matrix, ids)
+    except Exception as e:
+        logger.warning(f"Gap detection skipped: {e}")
+        gaps = []
 
     # ------------------------------------------------------------------
     # 9. Serialise & cache
@@ -294,9 +334,13 @@ def build_semantic_graph(db_manager, k_neighbors: int = 10, force_rebuild: bool 
             "n_with_doi": stats_doi,
             "n_with_summary": stats_summary,
             "built_at": int(time.time()),
+            "subset_key": subset_key,
         },
     }
-    _save_cache(graph)
+    if subset is None:
+        _save_cache(graph)
+    elif cache_path:
+        Path(cache_path).write_text(json.dumps(graph))
     logger.info(f"Graph built: {len(nodes)} nodes, {len(edges)} edges, {len(unique_labels)} clusters.")
     return graph
 

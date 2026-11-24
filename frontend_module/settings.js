@@ -126,6 +126,8 @@
       return false;
     }
     await loadAI();
+    // project-refs.js shows the "Check with AI" button only when a provider is set
+    window.dispatchEvent(new CustomEvent("ai-settings-changed"));
     return true;
   }
 

@@ -29,6 +29,7 @@
   - **Bag-of-Words (BoW) Inverted Index** for instant keyword matching without embedding overhead.
 - **LaTeX Manuscript Integration**: Interactive web editor that lets users highlight text, query the local library semantically, and inject references into `.bib` files.
 - **Graph & Neighborhood Visualizer**: Computes UMAP dimensionality reduction and citation networks to view paper relations in 2D/3D.
+- **Project references and sentence-level evidence**: `zotero_module/` reads a local Zotero library read-only (a copy of `zotero.sqlite`); `project_module/` keeps each project's paper list in `projects/<p>/project.json` and syncs it from a linked Zotero collection; `evidence_module/` indexes each PDF sentence by sentence (EmbeddingGemma at 768 dimensions, `library/<id>/passages.*`) and finds the sentences matching a claim, splitting it at citation markers; `server_module/refs_api.py` exposes it (`/api/zotero/*`, `/api/projects/{p}/refs|zotero|sync|papers|evidence|import-docx`). Search, library and graph accept a `project` scope. Tests: `tests/test_zotero_projects.py`. Docs: `docs/zotero-projects.md`.
 - **Distributed Multi-Machine Support**: Locks single active server instance via `server.lock` and supports remote worker modes (`windows_worker.py`) for syncing Google Drive folders and offloading embedding calculation.
 
 ---

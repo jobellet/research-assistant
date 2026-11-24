@@ -8,7 +8,7 @@
       name="description"
       content="AI-powered LaTeX editor with semantic search and citation management across multiple projects."
     />
-    <link rel="stylesheet" href="style.css?v=5" />
+    <link rel="stylesheet" href="style.css?v=7" />
     <!-- Load D3.js for Knowledge Graph -->
     <script src="https://d3js.org/d3.v7.min.js"></script>
   </head>
@@ -74,6 +74,30 @@
           </div>
         </div>
 
+
+        <!-- Project references (Zotero collection, papers of this project) -->
+        <div id="refs-section" class="refs-section" data-server-only="1">
+          <div class="project-section-header">
+            <span class="project-label">REFERENCES</span>
+            <button id="btn-refs-sync" class="icon-btn" title="Sync with Zotero now" aria-label="Sync with Zotero" hidden>⟳</button>
+          </div>
+          <div id="refs-summary" class="refs-summary" role="status" aria-live="polite">No papers in this project yet.</div>
+          <div class="refs-actions">
+            <button id="btn-refs-link" class="action-btn-sm secondary" title="Use the papers of a Zotero collection as this project's references">Link Zotero collection…</button>
+            <button id="btn-refs-list" class="action-btn-sm secondary" title="Show this project's papers in the Library tab">Show papers</button>
+          </div>
+          <div id="refs-link-panel" class="inline-modal hidden">
+            <label class="refs-label" for="refs-collection-select">Zotero collection</label>
+            <select id="refs-collection-select" class="refs-select"></select>
+            <label class="refs-check"><input type="checkbox" id="refs-include-sub" /> include subcollections</label>
+            <div class="inline-modal-actions">
+              <button id="btn-refs-link-ok" class="action-btn-sm">Link and sync</button>
+              <button id="btn-refs-unlink" class="action-btn-sm secondary" hidden>Unlink</button>
+              <button id="btn-refs-link-cancel" class="action-btn-sm secondary">Cancel</button>
+            </div>
+          </div>
+        </div>
+
         <!-- File List -->
         <nav>
           <ul id="file-list">
@@ -87,6 +111,10 @@
             </li>
             <li class="nav-item" data-file="bib" role="button" tabindex="0">
               references.bib
+            </li>
+            <li id="btn-import-docx" class="nav-item import-item" role="button" tabindex="0" data-server-only="1"
+                title="Replace the draft with the text of a Word manuscript">
+              ⇪ Import .docx…
             </li>
           </ul>
         </nav>
@@ -296,6 +324,10 @@
           role="tabpanel"
           aria-labelledby="tab-library"
         >
+          <div id="library-scope" class="scope-toggle" role="group" aria-label="Papers shown" data-server-only="1" hidden>
+            <button id="scope-project" class="view-btn" aria-pressed="true">This project</button>
+            <button id="scope-all" class="view-btn" aria-pressed="false">Whole library</button>
+          </div>
           <div
             class="library-search-wrapper"
             style="
@@ -452,6 +484,8 @@
           role="tabpanel"
           aria-labelledby="tab-matches"
         >
+          <div id="evidence-section" class="evidence-section" hidden></div>
+          <div id="paper-matches">
           <div
             class="empty-state"
             style="text-align: center; padding: 2rem 1rem"
@@ -477,6 +511,7 @@
             >
               Highlight a claim in your draft to find supporting papers.
             </div>
+          </div>
           </div>
         </div>
 
@@ -626,9 +661,11 @@
     <script src="drive-sync.js?v=1"></script>
     <script src="literature-core.js?v=1"></script>
     <script src="phone-library.js?v=1"></script>
-    <script src="app.js?v=5"></script>
+    <script src="app.js?v=7"></script>
+    <script src="project-refs.js?v=2"></script>
     <script src="discover.js?v=1"></script>
     <script src="ask.js?v=1"></script>
-    <script src="settings.js?v=1"></script>
+    <script src="settings.js?v=2"></script>
+    <input type="file" id="docx-file-input" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden />
   </body>
 </html>

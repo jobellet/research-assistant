@@ -29,6 +29,7 @@ All screenshots and animations were captured from the running application.
 14. [Laptop and phone: Google Drive sync](#14-laptop-and-phone-google-drive-sync)
 15. [Use it from Gemini (MCP)](#15-use-it-from-gemini-mcp)
 16. [Command-line reference and troubleshooting](#16-command-line-reference-and-troubleshooting)
+17. [Project references from Zotero; checking a claim against its sources](#17-project-references-from-zotero-checking-a-claim-against-its-sources)
 
 ---
 
@@ -377,3 +378,23 @@ notes and troubleshooting: [docs/mcp.md](docs/mcp.md).
   wait a minute or add `S2_API_KEY` / `OPENALEX_API_KEY` to `.env`.
 - *"Another instance running?"*: a previous server is still running (or left
   `server.lock` behind after a crash); stop it or delete `server.lock`.
+
+## 17. Project references from Zotero; checking a claim against its sources
+
+A project can have its own list of papers, taken from a **Zotero collection**:
+under **REFERENCES** in the sidebar, click **Link Zotero collection…**. The
+collection's PDFs are copied into your private library and indexed sentence by
+sentence. Papers you add to that Zotero folder later join the project
+automatically. The **Library** tab, the searches and the **Knowledge Graph** can
+then show **This project** only.
+
+Import your manuscript with **⇪ Import .docx…** (or paste it), highlight a
+sentence, and **Matches** shows the sentences of the project's papers that match
+it, with their page numbers. Citation markers such as `,33`, `[33]`,
+`\cite{key}` or `(Author, 1985)` are recognized: each cited part of the sentence
+is checked on its own, and the cited paper comes first. **Check with AI**
+(optional) asks your AI provider whether each sentence supports or contradicts
+the claim.
+
+Full guide: [docs/zotero-projects.md](docs/zotero-projects.md).
+

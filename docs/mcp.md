@@ -170,6 +170,9 @@ Notes:
 | `add_citation` | add a library paper to a project's BibTeX | **edits `references.bib`** |
 | `create_project` | create a project | **adds a folder** |
 | `append_to_draft` | append LaTeX to the end of a draft | **edits `draft.tex`** |
+| `project_references` | a project's papers (Zotero collection and papers added by hand) | no |
+| `check_claim` | the sentences of a project's papers that match a claim, cited paper first ([details](zotero-projects.md)) | no |
+| `sync_project_zotero` | update a project's papers from its Zotero collection | **copies PDFs into the library, edits `references.bib`** |
 
 ## Stop, restart, and what changes each time
 

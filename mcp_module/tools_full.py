@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+from urllib.parse import quote
 from typing import Any, Callable, Dict, List
 
 MAX_TEXT = 60_000
@@ -84,6 +85,22 @@ SPECS: Dict[str, Any] = {
     "append_to_draft": (
         "Append text at the end of a project's LaTeX draft. It never replaces or deletes existing text.",
         _schema({"project": PROJECT, "text": _s("string", "LaTeX text to append")}, ["text"]), WRITE),
+    "project_references": (
+        "The papers of a project (its reference list: a linked Zotero collection and papers added by hand), "
+        "with their BibTeX keys and whether their sentences are indexed for check_claim.",
+        _schema({"project": PROJECT}, []), READ),
+    "check_claim": (
+        "Check a claim of the manuscript against the project's own papers: returns the sentences of those papers "
+        "that best match it, with page numbers and the neighbouring sentences. Paste the sentence with its citation "
+        "markers (',32', '[12]', '\\cite{key}' or '(Author, 2001)'): each cited part is then checked on its own and "
+        "the cited paper comes first. Similar sentences can support OR contradict the claim: read them and judge.",
+        _schema({"project": PROJECT, "text": _s("string", "The claim (one or a few sentences of the manuscript)"),
+                 "per_paper": _s("integer", "Sentences per paper (default 3, max 6)", minimum=1, maximum=6)},
+                ["text"]), READ),
+    "sync_project_zotero": (
+        "Bring a project's papers up to date with its linked Zotero collection (copies new PDFs into the library, "
+        "indexes them, adds BibTeX entries). Runs in the background: see project_references.",
+        _schema({"project": PROJECT}, []), WRITE),
 }
 
 
@@ -101,6 +118,31 @@ def _project(args) -> str:
     if not PROJECT_RE.fullmatch(p) or p.startswith("."):
         raise ValueError("invalid project name")
     return p
+
+
+def _pq(args) -> str:
+    """Project name for a URL path."""
+    return quote(_project(args), safe="")
+
+
+def _evidence_summary(r: Dict) -> Dict:
+    """Keep what an assistant needs: claim parts, cited papers first, sentences with pages."""
+    def block(b):
+        return {"claim": b.get("claim"), "cites": b.get("cites"),
+                "not_in_project": [u.get("label") + (": " + u["reference"][:160] if u.get("reference") else "")
+                                   for u in b.get("unresolved", [])],
+                "papers": [{"title": p.get("title"), "authors": p.get("authors"), "year": p.get("year"),
+                            "bib_key": p.get("bib_key"), "cited": p.get("cited", False),
+                            "sentences": [{"page": s.get("page"), "similarity": s.get("similarity"),
+                                           "text": s.get("text"), "context_before": s.get("before"),
+                                           "context_after": s.get("after")} for s in p.get("passages", [])]}
+                           for p in b.get("papers", []) if p.get("passages")]}
+    out = {"whole_claim": block(r)}
+    if r.get("parts"):
+        out["cited_parts"] = [block(p) for p in r["parts"]]
+    if r.get("not_indexed"):
+        out["note"] = f"{len(r['not_indexed'])} paper(s) are still being indexed (word matches only for them)."
+    return out
 
 
 def make_handlers(server) -> Dict[str, Callable[[Dict], str]]:
@@ -205,11 +247,19 @@ def make_handlers(server) -> Dict[str, Callable[[Dict], str]]:
         text = str(args.get("text", ""))
         if not text.strip():
             raise ValueError("text is empty")
-        cur = app().get(f"/api/projects/{proj}/draft")
+        cur = app().get(f"/api/projects/{quote(proj, safe='')}/draft")
         old = cur.get("content", "") if isinstance(cur, dict) else str(cur or "")
         sep = "" if not old or old.endswith("\n") else "\n"
-        app().put(f"/api/projects/{proj}/draft", {"content": old + sep + text + ("" if text.endswith("\n") else "\n")})
+        app().put(f"/api/projects/{quote(proj, safe='')}/draft", {"content": old + sep + text + ("" if text.endswith("\n") else "\n")})
         return json.dumps({"status": "appended", "project": proj, "added_chars": len(text)})
+
+    def check_claim(args):
+        text = str(args.get("text", "")).strip()
+        if not text:
+            raise ValueError("text is empty")
+        per = max(1, min(int(args.get("per_paper") or 3), 6))
+        r = app().post(f"/api/projects/{_pq(args)}/evidence", {"text": text[:5000], "per_paper": per})
+        return _clip(_evidence_summary(r))
 
     return {
         "check_in_library": check, "add_to_library": add_to_library,
@@ -219,9 +269,12 @@ def make_handlers(server) -> Dict[str, Callable[[Dict], str]]:
         "related_online": related, "literature_for_text": for_text, "graph_neighbors": neighbors,
         "audit_claims": audit,
         "list_projects": lambda a: _clip(app().get("/api/projects")),
-        "get_draft": lambda a: _clip(app().get(f"/api/projects/{_project(a)}/draft")),
-        "get_bib": lambda a: _clip(app().get(f"/api/projects/{_project(a)}/bib")),
+        "get_draft": lambda a: _clip(app().get(f"/api/projects/{_pq(a)}/draft")),
+        "get_bib": lambda a: _clip(app().get(f"/api/projects/{_pq(a)}/bib")),
         "add_citation": add_citation,
         "create_project": lambda a: _clip(app().post("/api/projects", {"name": _project({"project": a.get("name")})})),
         "append_to_draft": append,
+        "project_references": lambda a: _clip(app().get(f"/api/projects/{_pq(a)}/refs")),
+        "check_claim": check_claim,
+        "sync_project_zotero": lambda a: _clip(app().post(f"/api/projects/{_pq(a)}/sync", {})),
     }

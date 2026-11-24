@@ -72,7 +72,7 @@ class SemanticSearcher:
 
         return found_files
 
-    def search(self, query_text, n_results=5, where=None):
+    def search(self, query_text, n_results=5, where=None, ids=None):
         """
         Perform semantic search and return matches grouped by DOI.
         """
@@ -92,6 +92,21 @@ class SemanticSearcher:
         }
         if where:
             query_kwargs["where"] = where
+        if ids is not None:
+            if not ids:
+                return []
+            # Chroma's query(ids=...) fails outright if any id is not in the
+            # collection (e.g. a project paper still being indexed), so keep
+            # only the ids that are actually there.
+            wanted = list(dict.fromkeys(ids))
+            found = self.db_manager.collection.get(ids=wanted, include=[]).get("ids") or []
+            if len(found) < len(wanted):
+                missing = sorted(set(wanted) - set(found))
+                logger.info(f"search: {len(missing)} scoped paper(s) not in the index yet: {missing[:5]}")
+            if not found:
+                return []
+            query_kwargs["ids"] = list(found)   # search only these papers (a project's)
+            query_kwargs["n_results"] = max(1, min(n_results, len(found)))
 
         raw_results = self.db_manager.collection.query(**query_kwargs)
         

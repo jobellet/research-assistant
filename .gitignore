@@ -26,9 +26,8 @@ library/*
 .processed_hashes.json
 papers_inventory.csv
 
-# Private projects (keep only default project template)
+# Private projects, including the default one (main.py recreates it at startup)
 projects/*
-!projects/default/
 
 # OS Specific
 .DS_Store
