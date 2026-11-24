@@ -356,11 +356,17 @@ def remove_paper(name: str, hash_id: str):
     return {"status": "removed"}
 
 
+MAX_DOCUMENT_TEXT = 3_000_000
+
+
 class EvidenceRequest(BaseModel):
     text: str
     per_paper: int = 3
     top_k: int = 10
     hash_ids: Optional[List[str]] = None   # restrict to some of the project's papers
+    # Full text of the manuscript the selection comes from (e.g. a Google Doc), used instead
+    # of the project's draft to read the numbered reference list.
+    document_text: Optional[str] = None
 
 
 def _paper_records(papers: List[Dict]) -> List[Dict]:
@@ -385,8 +391,18 @@ def _paper_records(papers: List[Dict]) -> List[Dict]:
 _resolver_cache: Dict[str, tuple] = {}
 
 
-def _resolver(project_dir: Path, papers: List[Dict]):
+def _resolver(project_dir: Path, papers: List[Dict], document_text: Optional[str] = None):
     from project_module.citations import CitationResolver
+    if document_text is not None:
+        import hashlib
+        key = ("doc", hashlib.sha256(document_text.encode("utf-8", "ignore")).hexdigest(),
+               tuple(sorted(p["hash_id"] for p in papers)))
+        cached = _resolver_cache.get(str(project_dir) + "#doc")
+        if cached and cached[0] == key:
+            return cached[1]
+        resolver = CitationResolver(_paper_records(papers), document_text)
+        _resolver_cache[str(project_dir) + "#doc"] = (key, resolver)
+        return resolver
     draft = project_dir / "draft.tex"
     try:
         stamp = (draft.stat().st_mtime_ns, tuple(sorted(p["hash_id"] for p in papers)))
@@ -423,6 +439,8 @@ def find_evidence(name: str, req: EvidenceRequest):
                                                     "collection or add papers from the library.")
     if len(req.text) > 5000:
         raise HTTPException(status_code=413, detail="Select a shorter passage (at most 5000 characters).")
+    if req.document_text is not None and len(req.document_text) > MAX_DOCUMENT_TEXT:
+        raise HTTPException(status_code=413, detail="The document is too long.")
     enc = get_encoder()
     try:
         result = ev.find_evidence(req.text, papers, enc, _ctx["library_dir"],
@@ -431,7 +449,7 @@ def find_evidence(name: str, req: EvidenceRequest):
         raise HTTPException(status_code=422, detail=str(e))
 
     # Which project papers do the citation markers of the selection point to?
-    resolver = _resolver(refs.dir, papers)
+    resolver = _resolver(refs.dir, papers, req.document_text)
     all_cited, all_unresolved = [], []
     for part in result["parts"]:
         res = resolver.resolve(part["cites"])
@@ -566,6 +584,9 @@ AUDIT_FILE = "citation_audit.json"
 class AuditRequest(BaseModel):
     check_dois: bool = True          # looks the reference list's DOIs up in Crossref
     suggest_missing: bool = True     # uncited sentences that closely match a project paper
+    # Audit this text (e.g. a Google Doc exported as text) instead of the project's draft.
+    text: Optional[str] = None
+    source: Optional[str] = None     # a label for the report, e.g. the document's title
 
 
 @router.post("/api/projects/{name}/citation-audit")
@@ -575,20 +596,33 @@ def start_citation_audit(name: str, req: AuditRequest):
     refs = _refs(name)
     project = refs.dir.name
     draft_path = refs.dir / "draft.tex"
-    if not draft_path.exists() or not draft_path.read_text(errors="ignore").strip():
+    if req.text is not None:
+        if len(req.text) > MAX_DOCUMENT_TEXT:
+            raise HTTPException(status_code=413, detail="The document is too long.")
+        if not req.text.strip():
+            raise HTTPException(status_code=400, detail="The document is empty.")
+    elif not draft_path.exists() or not draft_path.read_text(errors="ignore").strip():
         raise HTTPException(status_code=400, detail="The project's draft is empty.")
+    if _job_state(f"audit:{project}").get("running"):
+        raise HTTPException(status_code=409, detail="An audit of this project is already running; "
+                                                    "try again when it has finished.")
     enc = get_encoder()
 
     def target(progress):
         from audit_module.citation_audit import run_audit
         papers = refs.load()["papers"]
-        draft = draft_path.read_text(errors="ignore")
-        _resolver_cache.pop(str(refs.dir), None)
-        resolver = _resolver(refs.dir, papers)
+        if req.text is not None:
+            draft = req.text
+            resolver = _resolver(refs.dir, papers, draft)
+        else:
+            draft = draft_path.read_text(errors="ignore")
+            _resolver_cache.pop(str(refs.dir), None)
+            resolver = _resolver(refs.dir, papers)
         report = run_audit(draft, resolver.papers, enc, _ctx["library_dir"], resolver,
                            check_dois=req.check_dois, suggest_missing=req.suggest_missing,
                            progress=progress)
         report["created"] = int(time.time())
+        report["source"] = (req.source or "")[:200] if req.text is not None else "draft"
         report["not_indexed"] = [p["hash_id"] for p in papers
                                  if not (_ctx["library_dir"] / p["hash_id"] / "passages.json").exists()]
         tmp = refs.dir / (AUDIT_FILE + ".tmp")

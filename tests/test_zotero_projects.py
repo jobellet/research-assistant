@@ -577,3 +577,22 @@ def test_project_files_are_never_tracked():
               "projects/default/project.json", "projects/other/draft.tex"):
         r = subprocess.run(["git", "-C", str(repo), "check-ignore", "-q", "--no-index", f])
         assert r.returncode == 0, f"{f} is not ignored"
+
+
+def test_api_document_text_and_audit_of_supplied_text(api):
+    api.put("/api/projects/paper/zotero", json={"collection_key": "COLL0001"})
+    _wait(api)
+    project_dir = api.library.parent / "projects" / "paper"
+    (project_dir / "draft.tex").write_text("An unrelated draft without references.")
+    doc = ("Wetland claims here.\n\nReferences\n"
+           "1. Smith, A. (1985). Carbon storage in peat layers of northern wetlands. J. Wet. "
+           "https://doi.org/10.5555/test.0001\n"
+           "2. Someone, B. (1999). A first unrelated paper. Misc.\n3. Someone, C. (1999). A second unrelated paper. Misc.\n")
+    claim = "Peat stores carbon,1 and much more."
+    without = api.post("/api/projects/paper/evidence", json={"text": claim}).json()
+    assert without["numbered_references"] == 0
+    with_doc = api.post("/api/projects/paper/evidence", json={"text": claim, "document_text": doc}).json()
+    assert with_doc["numbered_references"] == 3
+    assert api.post("/api/projects/paper/evidence",
+                    json={"text": claim, "document_text": "x" * 3_000_001}).status_code == 413
+    assert api.post("/api/projects/paper/citation-audit", json={"text": "   "}).status_code == 400

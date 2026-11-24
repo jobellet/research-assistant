@@ -150,6 +150,12 @@ the DOIs of your reference list to Crossref; nothing else leaves your computer.
   for distinctive words and numbers it shares with the claim. For a cited part,
   the part counts for 65% and the whole sentence for 35%.
 
+## Use it in Google Docs
+
+The Chrome extension ([docs/browser-extension.md](browser-extension.md)) does the same
+checks from a Google Doc: select a claim, press Alt+Shift+K, and the side panel shows the
+matching sentences; or audit all citations of the Doc.
+
 ## Use it from Gemini or another MCP client
 
 In `full` mode the MCP server ([docs/mcp.md](mcp.md)) has three more tools:

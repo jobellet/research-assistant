@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Research Assistant</title>
+  <link rel="stylesheet" href="sidepanel.css" />
+</head>
+<body>
+  <header>
+    <div class="row">
+      <label for="project" class="label">Project</label>
+      <button id="btn-settings" class="icon" title="Settings" aria-label="Settings" aria-expanded="false">⚙</button>
+    </div>
+    <select id="project" aria-label="Project"><option>…</option></select>
+    <div id="status" class="status" role="status" aria-live="polite"></div>
+  </header>
+
+  <section id="settings" class="card" hidden>
+    <label class="label" for="server">Server</label>
+    <input id="server" type="text" placeholder="http://127.0.0.1:8000" autocomplete="off" />
+    <label class="label" for="password">Password (SERVER_PASSWORD)</label>
+    <input id="password" type="password" autocomplete="off" />
+    <p class="hint">Stored only in this browser. The extension talks only to the server on this computer.</p>
+    <div class="row gap">
+      <button id="btn-save" class="primary">Save and connect</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="row gap wrap">
+      <button id="btn-selection" class="primary" title="Alt+Shift+K in the document">Check selection</button>
+      <button id="btn-clipboard" title="Select in the document, press Ctrl+C (⌘C), then click here">Check copied text</button>
+    </div>
+    <p class="hint" id="docs-hint" hidden>In Google Docs: select the sentence and press <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd>,
+      or copy it (<kbd>⌘C</kbd> / <kbd>Ctrl+C</kbd>) and click <em>Check copied text</em>.</p>
+    <details>
+      <summary>Type or paste a claim</summary>
+      <textarea id="claim" rows="4" placeholder="Paste a sentence with its citation markers (,12 · [12] · (Smith, 2001))"></textarea>
+      <button id="btn-check">Check</button>
+    </details>
+    <div class="row gap wrap audit-row">
+      <button id="btn-audit" title="Check every citation and DOI of this Google Doc">Audit all citations of this Doc</button>
+    </div>
+  </section>
+
+  <section id="results-head" class="row" hidden>
+    <h2 id="results-title">Results</h2>
+    <button id="btn-judge" hidden title="Ask your AI provider (research-assistant Settings) whether each sentence supports the claim. Sends the claim and these sentences to that provider.">Check with AI</button>
+  </section>
+  <main id="results"></main>
+
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>
