@@ -85,17 +85,31 @@ SPECS: Dict[str, Any] = {
     "append_to_draft": (
         "Append text at the end of a project's LaTeX draft. It never replaces or deletes existing text.",
         _schema({"project": PROJECT, "text": _s("string", "LaTeX text to append")}, ["text"]), WRITE),
+    "zotero_collections": (
+        "List all collections (folders) in the user's local Zotero library with their key, full path and item count.",
+        _schema({}, []), READ),
+    "link_project_zotero": (
+        "Link a project to a Zotero collection (by collection_key or collection name/path) and start syncing its PDFs.",
+        _schema({"project": PROJECT,
+                 "collection_key": _s("string", "Zotero collection key (e.g. from zotero_collections)"),
+                 "zotero_collection": _s("string", "Zotero collection name or path (used if collection_key is omitted)"),
+                 "include_subcollections": _s("boolean", "Also include papers from subcollections (default false)")},
+                []), WRITE),
     "project_references": (
         "The papers of a project (its reference list: a linked Zotero collection and papers added by hand), "
         "with their BibTeX keys and whether their sentences are indexed for check_claim.",
         _schema({"project": PROJECT}, []), READ),
     "check_claim": (
-        "Check a claim of the manuscript against the project's own papers: returns the sentences of those papers "
-        "that best match it, with page numbers and the neighbouring sentences. Paste the sentence with its citation "
-        "markers (',32', '[12]', '\\cite{key}' or '(Author, 2001)'): each cited part is then checked on its own and "
-        "the cited paper comes first. Similar sentences can support OR contradict the claim: read them and judge.",
-        _schema({"project": PROJECT, "text": _s("string", "The claim (one or a few sentences of the manuscript)"),
-                 "per_paper": _s("integer", "Sentences per paper (default 3, max 6)", minimum=1, maximum=6)},
+        "Check a claim of the manuscript against a project's papers or a linked Zotero collection: returns the sentences "
+        "of those papers that best match it, with page numbers and the neighbouring sentences. Pass either 'project' or "
+        "'zotero_collection' (a Zotero folder name, path, or key). Paste the sentence with its citation markers "
+        "(',32', '[12]', '\\cite{key}' or '(Author, 2001)'): each cited part is then checked on its own and the cited "
+        "paper comes first. Similar sentences can support OR contradict the claim: read them and judge.",
+        _schema({"project": PROJECT,
+                 "zotero_collection": _s("string", "Optional Zotero collection name, path, or key (resolves to its linked project)"),
+                 "text": _s("string", "The claim (one or a few sentences of the manuscript)"),
+                 "per_paper": _s("integer", "Sentences per paper (default 3, max 6)", minimum=1, maximum=6),
+                 "max_papers": _s("integer", "Maximum papers to return per claim part (default 8, max 20)", minimum=1, maximum=20)},
                 ["text"]), READ),
     "audit_citations": (
         "Check ALL citations of a project's draft automatically. For every citing sentence and every cited part of it, "
@@ -139,24 +153,35 @@ def _pq(args) -> str:
     return quote(_project(args), safe="")
 
 
-def _evidence_summary(r: Dict) -> Dict:
-    """Keep what an assistant needs: claim parts, cited papers first, sentences with pages."""
-    def block(b):
+def _evidence_summary(r: Dict, max_papers: int = 8) -> Dict:
+    """Keep what an assistant needs: claim parts, cited papers first, sentences with pages.
+    Caps papers per block and shrinks until the serialized JSON fits within MAX_TEXT."""
+    def block(b, lim):
+        papers = [p for p in b.get("papers", []) if p.get("passages")]
+        cited = [p for p in papers if p.get("cited")]
+        uncited = [p for p in papers if not p.get("cited")]
+        kept = cited + uncited[:max(0, lim - len(cited))]
         return {"claim": b.get("claim"), "cites": b.get("cites"),
                 "not_in_project": [u.get("label") + (": " + u["reference"][:160] if u.get("reference") else "")
                                    for u in b.get("unresolved", [])],
+                "total_matching_papers": len(papers),
                 "papers": [{"title": p.get("title"), "authors": p.get("authors"), "year": p.get("year"),
                             "bib_key": p.get("bib_key"), "cited": p.get("cited", False),
                             "sentences": [{"page": s.get("page"), "similarity": s.get("similarity"),
                                            "text": s.get("text"), "context_before": s.get("before"),
                                            "context_after": s.get("after")} for s in p.get("passages", [])]}
-                           for p in b.get("papers", []) if p.get("passages")]}
-    out = {"whole_claim": block(r)}
-    if r.get("parts"):
-        out["cited_parts"] = [block(p) for p in r["parts"]]
-    if r.get("not_indexed"):
-        out["note"] = f"{len(r['not_indexed'])} paper(s) are still being indexed (word matches only for them)."
-    return out
+                           for p in kept]}
+
+    lim = max(1, min(int(max_papers or 8), 20))
+    while True:
+        out = {"whole_claim": block(r, lim)}
+        if r.get("parts"):
+            out["cited_parts"] = [block(p, lim) for p in r["parts"]]
+        if r.get("not_indexed"):
+            out["note"] = f"{len(r['not_indexed'])} paper(s) are still being indexed (word matches only for them)."
+        if lim == 1 or len(json.dumps(out, ensure_ascii=False)) <= MAX_TEXT:
+            return out
+        lim = max(1, lim // 2)
 
 
 def _compact_citation(c: Dict) -> Dict:
@@ -318,13 +343,71 @@ def make_handlers(server) -> Dict[str, Callable[[Dict], str]]:
             out["not_indexed"] = report.get("not_indexed", [])
         return _clip(out)
 
+    def _resolve_project_for_zotero(zotero_query: str) -> str:
+        """Find the project linked to a Zotero collection (matching key, exact name/path, or substring)."""
+        q = zotero_query.strip().lower()
+        if not q:
+            raise ValueError("zotero_collection is empty")
+        projs = app().get("/api/projects")
+        proj_list = projs.get("projects", projs) if isinstance(projs, dict) else (projs or [])
+        names = [p["name"] if isinstance(p, dict) else str(p) for p in proj_list]
+        exact, partial = [], []
+        for pname in names:
+            try:
+                refs = app().get(f"/api/projects/{quote(pname, safe='')}/refs")
+            except Exception:
+                continue
+            z = (refs or {}).get("zotero") or {}
+            key = str(z.get("collection_key") or "").strip().lower()
+            cname = str(z.get("collection_name") or "").strip().lower()
+            if not key and not cname:
+                continue
+            if q == key or q == cname or q == cname.split(" / ")[-1]:
+                exact.append(pname)
+            elif q in cname:
+                partial.append(pname)
+        if exact:
+            return exact[0]
+        if len(partial) == 1:
+            return partial[0]
+        if len(partial) > 1:
+            raise ValueError(f"multiple projects match Zotero collection {zotero_query!r}: {partial}")
+        raise ValueError(f"no project is linked to Zotero collection {zotero_query!r}; "
+                         "use zotero_collections and link_project_zotero first")
+
+    def link_project_zotero(args):
+        key = str(args.get("collection_key") or "").strip()
+        if not key:
+            q = str(args.get("zotero_collection") or "").strip().lower()
+            if not q:
+                raise ValueError("collection_key or zotero_collection is required")
+            cols = (app().get("/api/zotero/collections") or {}).get("collections") or []
+            matches = [c for c in cols if q in (str(c.get("key", "")).lower(),
+                                                str(c.get("name", "")).lower(),
+                                                str(c.get("path", "")).lower())]
+            if not matches:
+                matches = [c for c in cols if q in str(c.get("path", "")).lower()]
+            if not matches:
+                raise ValueError(f"Zotero collection {args.get('zotero_collection')!r} not found")
+            if len(matches) > 1:
+                raise ValueError(f"multiple Zotero collections match: {[c.get('path') for c in matches[:5]]}")
+            key = matches[0]["key"]
+        body = {"collection_key": key, "include_subcollections": bool(args.get("include_subcollections", False))}
+        return _clip(app().put(f"/api/projects/{_pq(args)}/zotero", body))
+
     def check_claim(args):
         text = str(args.get("text", "")).strip()
         if not text:
             raise ValueError("text is empty")
         per = max(1, min(int(args.get("per_paper") or 3), 6))
-        r = app().post(f"/api/projects/{_pq(args)}/evidence", {"text": text[:5000], "per_paper": per})
-        return _clip(_evidence_summary(r))
+        max_papers = max(1, min(int(args.get("max_papers") or 8), 20))
+        if args.get("zotero_collection"):
+            proj_name = _resolve_project_for_zotero(str(args["zotero_collection"]))
+            proj_q = quote(proj_name, safe="")
+        else:
+            proj_q = _pq(args)
+        r = app().post(f"/api/projects/{proj_q}/evidence", {"text": text[:5000], "per_paper": per})
+        return _clip(_evidence_summary(r, max_papers=max_papers))
 
     return {
         "check_in_library": check, "add_to_library": add_to_library,
@@ -339,6 +422,8 @@ def make_handlers(server) -> Dict[str, Callable[[Dict], str]]:
         "add_citation": add_citation,
         "create_project": lambda a: _clip(app().post("/api/projects", {"name": _project({"project": a.get("name")})})),
         "append_to_draft": append,
+        "zotero_collections": lambda a: _clip(app().get("/api/zotero/collections")),
+        "link_project_zotero": link_project_zotero,
         "project_references": lambda a: _clip(app().get(f"/api/projects/{_pq(a)}/refs")),
         "check_claim": check_claim,
         "audit_citations": audit_citations,

@@ -170,8 +170,10 @@ Notes:
 | `add_citation` | add a library paper to a project's BibTeX | **edits `references.bib`** |
 | `create_project` | create a project | **adds a folder** |
 | `append_to_draft` | append LaTeX to the end of a draft | **edits `draft.tex`** |
+| `zotero_collections` | list collections (folders) in your local Zotero library | no |
+| `link_project_zotero` | link a project to a Zotero collection (by key or name/path) and start syncing | **copies PDFs into the library, edits `project.json` and `references.bib`** |
 | `project_references` | a project's papers (Zotero collection and papers added by hand) | no |
-| `check_claim` | the sentences of a project's papers that match a claim, cited paper first ([details](zotero-projects.md)) | no |
+| `check_claim` | the sentences of a project's papers (or linked `zotero_collection`) that match a claim, cited paper first ([details](zotero-projects.md)) | no |
 | `audit_citations` | checks **every** citation of a project's draft: best sentences of each cited paper, references missing from the project, numbers without a reference, uncited references, DOIs checked in Crossref, better-matching papers, possibly missing citations ([details](zotero-projects.md#5-audit-all-citations-of-the-draft)) | no (looks DOIs up in Crossref) |
 | `sync_project_zotero` | update a project's papers from its Zotero collection | **copies PDFs into the library, edits `references.bib`** |
 

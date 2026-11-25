@@ -267,3 +267,60 @@ def test_audit_citations_page_is_valid_json_even_when_large(lib):
     out = json.loads(text)                       # never truncated into invalid JSON
     assert out["citations"] and out["next_offset"] == len(out["citations"])
     assert "before" not in out["citations"][0]["parts"][0]["refs"][0]["best_sentences"][0]
+
+
+def test_zotero_collections_link_and_check_claim_by_collection(lib):
+    app = FakeApp()
+    def fake_get(path, params=None):
+        app.calls.append(("GET", path, params))
+        if path == "/api/zotero/collections":
+            return {"collections": [{"key": "COL1", "name": "River Ecology",
+                                     "path": "Fieldwork / River Ecology", "item_count": 27}]}
+        if path == "/api/projects":
+            return {"projects": [{"name": "default"}, {"name": "river-ecology"}]}
+        if path == "/api/projects/default/refs":
+            return {"project": "default", "zotero": None, "papers": []}
+        if path == "/api/projects/river-ecology/refs":
+            return {"project": "river-ecology",
+                    "zotero": {"collection_key": "COL1", "collection_name": "Fieldwork / River Ecology"},
+                    "papers": []}
+        return {"ok": True}
+    app.get = fake_get
+    app.post = lambda path, body: (app.calls.append(("POST", path, body)),
+                                   {"claim": body["text"], "papers": [], "top": [], "parts": [], "unresolved": []})[1]
+    app.put = lambda path, body: (app.calls.append(("PUT", path, body)), {"status": "linked"})[1]
+    s = McpServer("full", lib, app=app)
+    tools = {t["name"]: t for t in s.handle(rpc("tools/list"))["result"]["tools"]}
+    assert tools["zotero_collections"]["annotations"]["readOnlyHint"] is True
+    assert tools["link_project_zotero"]["annotations"]["readOnlyHint"] is False
+
+    err, cols_out = call(s, "zotero_collections")
+    assert not err and json.loads(cols_out)["collections"][0]["key"] == "COL1"
+
+    err, link_out = call(s, "link_project_zotero", project="default", zotero_collection="River Ecology")
+    assert not err and ("PUT", "/api/projects/default/zotero", {"collection_key": "COL1", "include_subcollections": False}) in app.calls
+
+    err, res_out = call(s, "check_claim", zotero_collection="River Ecology", text="Test claim.")
+    assert not err
+    assert app.calls[-1][1] == "/api/projects/river-ecology/evidence"
+
+    err, msg = call(s, "check_claim", zotero_collection="nonexistent folder", text="Test claim.")
+    assert err and "no project is linked" in msg
+
+
+def test_check_claim_stays_valid_json_when_many_papers(lib):
+    app = FakeApp()
+    big = "word " * 400
+    many = [{"hash_id": f"h{i}", "title": f"Paper {i}", "authors": "A", "year": "2020", "bib_key": f"a{i}",
+             "cited": i == 0, "best_score": 0.9 - 0.01 * i,
+             "passages": [{"text": big, "page": 1, "similarity": 0.8, "before": big, "after": big}] * 4}
+            for i in range(25)]
+    app.post = lambda path, body: {"claim": body["text"], "papers": many, "top": [], "parts": [], "unresolved": []}
+    s = McpServer("full", lib, app=app)
+    err, text = call(s, "check_claim", project="p", text="Claim", per_paper=4, max_papers=20)
+    assert not err
+    out = json.loads(text)   # must always be valid JSON, never truncated mid-string
+    assert out["whole_claim"]["total_matching_papers"] == 25
+    assert out["whole_claim"]["papers"][0]["cited"] is True
+
+

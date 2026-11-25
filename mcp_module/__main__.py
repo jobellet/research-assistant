@@ -14,6 +14,17 @@ import sys
 import threading
 from pathlib import Path
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+except ImportError:
+    _env_file = Path(__file__).resolve().parent.parent / ".env"
+    if _env_file.is_file():
+        for _line in _env_file.read_text().splitlines():
+            if "=" in _line and not _line.strip().startswith("#"):
+                _k, _v = _line.split("=", 1)
+                os.environ.setdefault(_k.strip(), _v.strip().strip("\"'"))
+
 import config
 from mcp_module.server import create_app
 
